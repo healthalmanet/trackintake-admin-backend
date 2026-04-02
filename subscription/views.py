@@ -10,7 +10,7 @@ from users.models import UserProfile
 from django.core.paginator import Paginator
 from django.utils import timezone
 from datetime import timedelta
-# --------- GET ALL PLANS + CREATE PLAN ---------
+#  GET ALL PLANS + CREATE PLAN 
 
 class SubscriptionPlanAPI(APIView):
 
@@ -33,7 +33,7 @@ class SubscriptionPlanAPI(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# --------- UPDATE PLAN ---------
+#  UPDATE PLAN 
 
 class UpdateSubscriptionPlanAPI(APIView):
 
@@ -100,7 +100,7 @@ class SubscriptionUsageAPI(APIView):
 
             data.append(record)
 
-        # -------- SEARCH --------
+        #  SEARCH 
         if search:
             data = [
                 d for d in data
@@ -108,21 +108,21 @@ class SubscriptionUsageAPI(APIView):
                 or search.lower() in (d["email"] or "").lower()
             ]
 
-        # -------- PLAN FILTER --------
+        # PLAN FILTER 
         if plan_filter:
             data = [
                 d for d in data
                 if d["plan_name"] and d["plan_name"].lower() == plan_filter.lower()
             ]
 
-        # -------- STATUS FILTER --------
+        # STATUS FILTER 
         if status_filter:
             data = [
                 d for d in data
                 if d["payment_status"] and d["payment_status"].lower() == status_filter.lower()
             ]
 
-        # -------- DATE FILTER --------
+        #  DATE FILTER 
         date_filter = request.query_params.get("date")
         month_filter = request.query_params.get("month")
         year_filter = request.query_params.get("year")
@@ -140,7 +140,7 @@ class SubscriptionUsageAPI(APIView):
         if end_date:
             data = [d for d in data if str(d["start_date"])[:10] <= end_date]
 
-        # -------- PAGINATION --------
+        #  PAGINATION 
         paginator = Paginator(data, page_size)
         page_obj = paginator.get_page(page)
 
@@ -164,7 +164,7 @@ class PaymentAnalyticsAPI(APIView):
 
         payments = SubscriptionPayment.objects.all()
 
-        # -------- DATE FILTER --------
+        #  DATE FILTER 
 
         today = timezone.now().date()
 
@@ -183,12 +183,12 @@ class PaymentAnalyticsAPI(APIView):
             elif filter_type == "month":
                 payments = payments.filter(created_at__month=today.month)
 
-        # -------- PLAN FILTER --------
+        #  PLAN FILTER 
 
         if plan:
             payments = payments.filter(plan_id=plan)
 
-        # -------- METRICS --------
+        #  METRICS 
 
         total_payments = payments.count()
 
