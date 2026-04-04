@@ -11,7 +11,7 @@ from users.models import UserProfile
 from subscription.models import SubscriptionPayment, UserSubscription
 
 
-# ---------------- TOTAL USERS ----------------
+#  TOTAL USERS
 
 class TotalUsersAPI(APIView):
 
@@ -34,7 +34,7 @@ class TotalUsersAPI(APIView):
         })
 
 
-# ---------------- ACTIVE USERS ----------------
+#  ACTIVE USERS 
 
 class ActiveUsersAPI(APIView):
 
@@ -57,7 +57,7 @@ class ActiveUsersAPI(APIView):
         })
 
 
-# ---------------- TOTAL REVENUE ----------------
+# TOTAL REVENUE -
 
 class TotalRevenueAPI(APIView):
 
@@ -130,7 +130,7 @@ class TotalRevenueAPI(APIView):
             "totalRevenue": total_revenue
         })
 
-# ---------------- PENDING APPOINTMENTS ----------------
+# PENDING APPOINTMENTS 
 
 class PendingAppointmentsAPI(APIView):
 
@@ -141,7 +141,7 @@ class PendingAppointmentsAPI(APIView):
         })
 
 
-# ---------------- USER GROWTH ----------------
+#  USER GROWTH 
 
 class UserGrowthAPI(APIView):
 
@@ -160,7 +160,7 @@ class UserGrowthAPI(APIView):
         })
 
 
-# ---------------- PLAN DISTRIBUTION ----------------
+#  PLAN DISTRIBUTION 
 
 class PlanDistributionAPI(APIView):
 
@@ -179,7 +179,7 @@ class PlanDistributionAPI(APIView):
         })
 
 
-# ---------------- RECENT ACTIVITY ----------------
+#  RECENT ACTIVITY 
 
 class RecentActivityAPI(APIView):
 
@@ -209,7 +209,7 @@ class RecentActivityAPI(APIView):
         })
 
 
-# ---------------- REVENUE BY PLAN ----------------
+# REVENUE BY PLAN 
 
 class RevenueByPlanAPI(APIView):
 
