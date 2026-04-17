@@ -131,34 +131,68 @@ class SubscriptionUsageAPI(APIView):
         responses={200: openapi.Response('Subscription usage details')}
     )
     def get(self, request):
+        try:
+            payments = SubscriptionPayment.objects.all().order_by("-created_at")
 
-        subs = UserSubscription.objects.all()
-        data = []
+            date = request.query_params.get("date")
+            month = request.query_params.get("month")
+            year = request.query_params.get("year")
 
-        for sub in subs:
+            if date:
+                payments = payments.filter(created_at__date=date)
+            elif month and year:
+                payments = payments.filter(created_at__month=month, created_at__year=year)
+            elif year:
+                payments = payments.filter(created_at__year=year)
 
-            user = UserProfile.objects.filter(id=sub.user_id).first()
-            plan = SubscriptionPlan.objects.filter(id=sub.plan_id).first()
+            status_filter = request.query_params.get("status")
+            if status_filter and status_filter != "all":
+                payments = payments.filter(status=status_filter)
 
-            payment = SubscriptionPayment.objects.filter(
-                user_id=sub.user_id,
-                plan_id=sub.plan_id
-            ).first()
+            search = request.query_params.get("search", "").strip()
+            page = int(request.query_params.get("page", 1))
+            page_size = int(request.query_params.get("page_size", 10))
 
-            # Only include users who have an actual payment (not free)
-            if not payment or payment.status not in ["success", "failed", "pending"]:
-                continue
+            all_data = []
+            for payment in payments:
+                user = UserProfile.objects.filter(id=payment.user_id).first()
+                user_name = user.full_name if user else f"User #{payment.user_id}"
+                email = user.email if user else ""
 
-            data.append({
-                "user_name": user.full_name if user else None,
-                "email": user.email if user else None,
-                "plan_name": plan.name if plan else None,
-                "payment_status": payment.status,
-                "start_date": sub.start_date,
-                "end_date": sub.end_date
+                if search:
+                    q = search.lower()
+                    if q not in user_name.lower() and q not in email.lower():
+                        continue
+
+                plan = SubscriptionPlan.objects.filter(id=payment.plan_id).first()
+                sub = UserSubscription.objects.filter(
+                    user_id=payment.user_id,
+                    plan_id=payment.plan_id
+                ).first()
+
+                all_data.append({
+                    "user_name": user_name,
+                    "email": email,
+                    "plan_name": plan.name if plan else f"Plan #{payment.plan_id}",
+                    "payment_id": payment.id,
+                    "payment_status": payment.status,
+                    "start_date": sub.start_date if sub else None,
+                    "end_date": sub.end_date if sub else None,
+                })
+
+            total = len(all_data)
+            start = (page - 1) * page_size
+            paginated = all_data[start:start + page_size]
+
+            return Response({
+                "results": paginated,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
             })
-
-        return Response(data)
+        except Exception as e:
+            return Response({"error": str(e), "results": [], "total": 0, "page": 1, "page_size": 10, "total_pages": 1}, status=500)
 
 
 # --------- PAYMENT ANALYTICS ---------
@@ -186,11 +220,21 @@ class PaymentAnalyticsAPI(APIView):
         total_payments = payments.count()
         total_revenue = payments.filter(status="success").aggregate(total=Sum("amount"))["total"] or 0
 
+        # Revenue per plan
+        from django.db.models import Sum as _Sum
+        revenue_per_plan_qs = (
+            payments.filter(status="success")
+            .values("plan_id")
+            .annotate(revenue=_Sum("amount"))
+        )
+        revenue_per_plan = [{"plan_id": r["plan_id"], "revenue": r["revenue"]} for r in revenue_per_plan_qs]
+
         return Response({
             "totalPayments": total_payments,
             "totalRevenue": total_revenue,
             "successPayments": payments.filter(status="success").count(),
             "failedPayments": payments.filter(status="failed").count(),
+            "revenuePerPlan": revenue_per_plan,
         })
 
 

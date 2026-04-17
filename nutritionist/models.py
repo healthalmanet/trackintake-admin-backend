@@ -14,12 +14,9 @@ class NutritionistProfile(models.Model):
 
 
 class PatientAssignment(models.Model):
-    nutritionist = models.ForeignKey(
-        NutritionistProfile,
-        on_delete=models.CASCADE,
-        related_name='assignments'
-    )
-    patient = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
+    nutritionist_id = models.IntegerField()  # FK to user_user.id (nutritionist's user ID)
+    patient_id = models.IntegerField()  # FK to user_user.id (patient's user ID)
+    assigned_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'nutritionist_patientassignment'

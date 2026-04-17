@@ -69,87 +69,63 @@ class AssignNutritionistAPI(APIView):
             user_id = request.data.get("user_id")
             nutritionist_id = request.data.get("nutritionist_id")
 
-            #  1. Validate input
             if not user_id or not nutritionist_id:
-                return Response(
-                    {"error": "user_id and nutritionist_id are required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response({"error": "user_id and nutritionist_id are required"}, status=status.HTTP_400_BAD_REQUEST)
 
             if int(user_id) == int(nutritionist_id):
-                return Response(
-                    {"error": "User and nutritionist cannot be same"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response({"error": "User and nutritionist cannot be same"}, status=status.HTTP_400_BAD_REQUEST)
 
-            #  2. Fetch user
-            user = UserProfile.objects.filter(id=user_id).first()
-            if not user:
-                return Response(
-                    {"error": "User not found"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+            # Fetch patient (UserProfile)
+            patient = UserProfile.objects.filter(id=user_id).first()
+            if not patient:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            #  3. Fetch nutritionist
-            nutritionist = UserProfile.objects.filter(id=nutritionist_id).first()
-            if not nutritionist:
-                return Response(
-                    {"error": "Nutritionist not found"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+            # Fetch nutritionist UserProfile
+            nutritionist_user = UserProfile.objects.filter(id=nutritionist_id).first()
+            if not nutritionist_user:
+                return Response({"error": "Nutritionist not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            if nutritionist.role.lower() != "nutritionist":
-                return Response(
-                    {"error": "Selected user is not a nutritionist"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            if nutritionist_user.role.lower() != "nutritionist":
+                return Response({"error": "Selected user is not a nutritionist"}, status=status.HTTP_400_BAD_REQUEST)
 
-            #  4. Prevent duplicate assignment
-            if hasattr(user, "nutritionist_id") and user.nutritionist_id == nutritionist.id:
-                return Response(
-                    {"error": "Nutritionist already assigned"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            # Get the NutritionistProfile for this user
+            nutritionist_profile = NutritionistProfile.objects.filter(user_id=nutritionist_id).first()
+            if not nutritionist_profile:
+                return Response({"error": "Nutritionist profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-            #  5. DB update (atomic transaction)
             with transaction.atomic():
+                # Prevent duplicate assignment
+                already = PatientAssignment.objects.filter(
+                    nutritionist_id=nutritionist_profile.id,
+                    patient_id=user_id
+                ).exists()
+                if already:
+                    return Response({"error": "Patient already assigned to this nutritionist"}, status=status.HTTP_400_BAD_REQUEST)
 
-                # IMPORTANT: user must have this field in model
-                user.nutritionist = nutritionist
-                user.save()
-
-                #  Notification to user
-                Notification.objects.create(
-                    user=user,
-                    message=f"Nutritionist {nutritionist.full_name} has been assigned to you."
+                PatientAssignment.objects.create(
+                    nutritionist_id=nutritionist_profile.id,
+                    patient_id=user_id
                 )
 
-                #  Notification to nutritionist
+                # Notifications
                 Notification.objects.create(
-                    user=nutritionist,
-                    message=f"You have been assigned to user {user.full_name}."
+                    user=patient,
+                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to you."
+                )
+                Notification.objects.create(
+                    user=nutritionist_user,
+                    message=f"You have been assigned to user {patient.full_name}."
                 )
 
-            #  6. Success response
-            return Response(
-                {
-                    "message": "Nutritionist assigned successfully",
-                    "data": {
-                        "user_id": user.id,
-                        "nutritionist_id": nutritionist.id
-                    }
-                },
-                status=status.HTTP_200_OK
-            )
+            return Response({
+                "message": "Nutritionist assigned successfully",
+                "data": {"user_id": patient.id, "nutritionist_id": nutritionist_user.id}
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response(
-                {
-                    "error": str(e),
-                    "message": "Something went wrong while assigning nutritionist"
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            import traceback
+            print("ASSIGN ERROR:", traceback.format_exc())
+            return Response({"error": str(e), "message": "Something went wrong while assigning nutritionist"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
 #=====================================================================================NUTRITIONIST LIST WITH PATIENT COUNT======================================================================#            
 class NutritionistListAPIView(APIView):
@@ -159,22 +135,21 @@ class NutritionistListAPIView(APIView):
         responses={200: "Success"}
     )
     def get(self, request):
-        nutritionists = NutritionistProfile.objects.annotate(
-            patient_count=Count('assignments')
-        )
+        nutritionists = NutritionistProfile.objects.all()
 
         data = []
         for n in nutritionists:
             user = UserProfile.objects.filter(id=n.user_id).first()
+            patient_count = PatientAssignment.objects.filter(nutritionist_id=n.id).count()
             data.append({
                 "id": n.id,
                 "user_id": n.user_id,
                 "user_name": user.full_name if user else f"User #{n.user_id}",
                 "email": user.email if user else None,
                 "nutritionist_type": n.nutritionist_type,
-                "is_virtual_enabled": getattr(n, 'is_virtual_enabled', False),
-                "is_verified": getattr(n, 'is_verified', False),
-                "patient_count": n.patient_count
+                "is_virtual_enabled": n.is_virtual_enabled,
+                "is_verified": n.is_verified,
+                "patient_count": patient_count
             })
 
         return Response({
