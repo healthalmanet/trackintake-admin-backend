@@ -8,6 +8,4 @@ urlpatterns = [
     path("usage/", SubscriptionUsageAPI.as_view()),
     path("payments/analytics/", PaymentAnalyticsAPI.as_view()),
     path("plans/duration/", PlanDurationTrackingAPI.as_view()),
-    path("api/subscription/", get_subscription_plan)
-    
 ]
