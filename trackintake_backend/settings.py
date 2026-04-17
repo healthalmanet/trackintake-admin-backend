@@ -29,13 +29,14 @@ INSTALLED_APPS = [
     'users',
     'subscription',
     'dashboard',
-    'meals'
+    'meals',
+    'notifications',
+    'nutritionist',
 ]
 
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -64,13 +65,12 @@ TEMPLATES = [
     },
 ]
 
-
 WSGI_APPLICATION = 'trackintake_backend.wsgi.application'
 
 
 # ✅ DATABASE from .env (DATABASE_URL)
 DATABASES = {
-    'default': dj_database_url.parse(os.getenv("DATABASE_URL"),conn_max_age=600,ssl_require=True)
+    'default': dj_database_url.config(default=os.getenv("DATABASE_URL"))
 }
 
 
@@ -90,3 +90,9 @@ REST_FRAMEWORK = {
 STATIC_URL = '/static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}

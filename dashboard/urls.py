@@ -9,8 +9,9 @@ from .views import (
     PlanDistributionAPI,
     RecentActivityAPI,
     RevenueByPlanAPI,
-    RevenueDetailsAPI
-    
+    RevenueDetailsAPI,
+    UsersWithPaymentNoProfileAPI,
+    UsersWithPaymentNoProfileAPI
 )
 
 urlpatterns = [
@@ -24,4 +25,5 @@ urlpatterns = [
     path("recent-activity/", RecentActivityAPI.as_view()),
     path("revenue-by-plan/", RevenueByPlanAPI.as_view()),
     path("revenue-details/", RevenueDetailsAPI.as_view()),
+    path("missing-profile-users/", UsersWithPaymentNoProfileAPI.as_view()),
 ]

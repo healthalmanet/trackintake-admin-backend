@@ -1,33 +1,23 @@
-from django.contrib import admin
 from django.urls import path
-from rest_framework.permissions import AllowAny
-from drf_yasg.views import get_schema_view
-from drf_yasg import openapi
-
 from users.views import (
+    AssignNutritionistAPI,
+    NutritionistListAPIView,
     UserListCreateView,
     UserDetailView,
-    UserStatusView,
-    DashboardStatsView
-)
-
-schema_view = get_schema_view(
-    openapi.Info(
-        title="User API",
-        default_version='v1',
-        description="User management API",
-    ),
-    public=True,
-    permission_classes=[AllowAny],
+    UserPlanNotificationAPI,
+    UsersWithPaymentNoProfileAPI,
+    UserHealthProfileAPI,
+    SubscribedUsersAPI,
 )
 
 urlpatterns = [
-    # admin path is not needed here, because project root already exposes /admin/
-
     path('', UserListCreateView.as_view(), name='user-list-create'),
-    path('<int:pk>/', UserDetailView.as_view(), name='user-detail'),
-    path('<int:pk>/status/', UserStatusView.as_view(), name='user-status'),
-    path('stats/', DashboardStatsView.as_view(), name='user-dashboard-stats'),
-
-    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0)),
+    path('create-user', UserListCreateView.as_view(), name='user-create'),
+    path("<int:user_id>/", UserDetailView.as_view(), name='user-detail'),
+    path("<int:user_id>/health-profile/", UserHealthProfileAPI.as_view(), name='user-health-profile'),
+    path("assign-nutritionist/", AssignNutritionistAPI.as_view(), name='assign-nutritionist'),
+    path("payment-no-profile/", UsersWithPaymentNoProfileAPI.as_view()),
+    path('nutritionists/', NutritionistListAPIView.as_view(), name='nutritionist-list'),
+    path("plan-renewal/", UserPlanNotificationAPI.as_view(), name='plan-renewal-notifications'),
+    path("subscribed/", SubscribedUsersAPI.as_view(), name='subscribed-users'),
 ]

@@ -21,12 +21,13 @@ class SubscriptionPlan(models.Model):
     chat_allowed = models.BooleanField(default=False)
 
     class Meta:
-        db_table = "subscriptions_plan"   # अगर table name यही है
+        db_table = "subscriptions_plan"
         managed = False
 
     def __str__(self):
         return self.name
     
+
 class UserSubscription(models.Model):
 
     id = models.BigAutoField(primary_key=True)
@@ -47,7 +48,11 @@ class UserSubscription(models.Model):
     class Meta:
         db_table = "subscriptions_usersubscription"
         managed = False    
-    
+
+    def __str__(self):
+        return f"User {self.user_id} - Plan {self.plan_id}"
+
+
 class SubscriptionPayment(models.Model):
 
     user_id = models.BigIntegerField()
@@ -61,4 +66,4 @@ class SubscriptionPayment(models.Model):
 
     class Meta:
         db_table = "subscriptions_payment"
-        managed = False        
+        managed = False
