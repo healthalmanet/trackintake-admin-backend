@@ -25,3 +25,7 @@ class Meal(models.Model):
 
     def __str__(self):
         return self.meal_name
+
+    class Meta:
+        managed = False
+        db_table = 'meals_meal'
