@@ -4,13 +4,22 @@ from .models import UserProfile
 
 class UserSerializer(serializers.ModelSerializer):
 
+<<<<<<< HEAD
+=======
+    plan = serializers.CharField(source='role')
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     class Meta:
         model = UserProfile
         fields = [
             "id",
             "full_name",
             "email",
+<<<<<<< HEAD
             "role",
+=======
+            "plan",
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
             "is_active",
             "date_joined"
         ]
@@ -18,13 +27,18 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserWriteSerializer(serializers.ModelSerializer):
 
+<<<<<<< HEAD
     password = serializers.CharField(write_only=True, required=True)
+=======
+    plan = serializers.CharField(source='role')
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
     class Meta:
         model = UserProfile
         fields = [
             "full_name",
             "email",
+<<<<<<< HEAD
             "password",
             "role",
             "is_active"
@@ -46,3 +60,8 @@ from rest_framework import serializers
 class AssignNutritionistSerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
     nutritionist_id = serializers.IntegerField()
+=======
+            "plan",
+            "is_active"
+        ]
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c

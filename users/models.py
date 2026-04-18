@@ -1,4 +1,5 @@
 from django.db import models
+<<<<<<< HEAD
 from django.contrib.auth import get_user_model
 User = get_user_model()
 
@@ -19,10 +20,18 @@ class UserProfile(models.Model):
     full_name = models.CharField(max_length=255)
     email = models.EmailField(unique=True)
     password = models.CharField(max_length=128)
+=======
+
+class UserProfile(models.Model):
+
+    full_name = models.CharField(max_length=255)
+    email = models.EmailField(unique=True)
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     role = models.CharField(max_length=50)
     is_active = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
 
+<<<<<<< HEAD
     # Patient ka plan (basic/silver/premium)
     # Nutritionist ka plan (hero)
     plan = models.CharField(max_length=100, null=True, blank=True, choices=PLAN_CHOICES)
@@ -74,3 +83,11 @@ class UserHealthProfile(models.Model):
         managed = False
 
 
+=======
+    class Meta:
+        db_table = "user_user"   # existing table name
+        managed = False
+
+    def __str__(self):
+        return self.full_name   
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c

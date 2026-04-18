@@ -1,8 +1,11 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+<<<<<<< HEAD
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+=======
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
 from .models import Meal
 from .serializers import MealSerializer
@@ -12,10 +15,13 @@ from .serializers import MealSerializer
 
 class MealListCreateAPI(APIView):
 
+<<<<<<< HEAD
     @swagger_auto_schema(
         operation_description="List all meals",
         responses={200: openapi.Response('List of meals', MealSerializer(many=True))}
     )
+=======
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         meals = Meal.objects.all()
@@ -24,6 +30,7 @@ class MealListCreateAPI(APIView):
 
         return Response(serializer.data)
 
+<<<<<<< HEAD
     @swagger_auto_schema(
         operation_description="Create a new meal",
         request_body=MealSerializer,
@@ -32,6 +39,9 @@ class MealListCreateAPI(APIView):
             400: 'Validation error'
         }
     )
+=======
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def post(self, request):
 
         serializer = MealSerializer(data=request.data)
@@ -55,6 +65,7 @@ class MealDetailAPI(APIView):
         except Meal.DoesNotExist:
             return None
 
+<<<<<<< HEAD
     @swagger_auto_schema(
         operation_description="Retrieve a specific meal by ID",
         manual_parameters=[
@@ -65,6 +76,9 @@ class MealDetailAPI(APIView):
             404: 'Meal not found'
         }
     )
+=======
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def put(self, request, pk):
 
         meal = self.get_object(pk)
@@ -81,6 +95,7 @@ class MealDetailAPI(APIView):
 
         return Response(serializer.errors, status=400)
 
+<<<<<<< HEAD
     @swagger_auto_schema(
         operation_description="Delete a meal",
         manual_parameters=[
@@ -91,6 +106,9 @@ class MealDetailAPI(APIView):
             404: 'Meal not found'
         }
     )
+=======
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def delete(self, request, pk):
 
         meal = self.get_object(pk)

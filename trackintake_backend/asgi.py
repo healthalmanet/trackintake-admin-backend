@@ -8,6 +8,7 @@ https://docs.djangoproject.com/en/5.2/howto/deployment/asgi/
 """
 
 import os
+<<<<<<< HEAD
 from channels.routing import ProtocolTypeRouter, URLRouter
 from django.core.asgi import get_asgi_application
 from channels.auth import AuthMiddlewareStack
@@ -24,3 +25,11 @@ application = ProtocolTypeRouter({
         )
     ),
 })
+=======
+
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'trackintake_backend.settings')
+
+application = get_asgi_application()
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c

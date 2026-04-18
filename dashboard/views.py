@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 from psycopg2 import OperationalError
+=======
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db.models import Count, Sum
@@ -7,6 +10,7 @@ from django.utils import timezone
 from datetime import timedelta
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+<<<<<<< HEAD
 from dashboard.models import UserPro
 from django.contrib.auth import get_user_model
 from users.models import UserProfile
@@ -31,6 +35,18 @@ class TotalUsersAPI(APIView):
     )
     def get(self, request):
 
+=======
+
+from users.models import UserProfile
+from subscription.models import SubscriptionPayment, UserSubscription
+
+
+#  TOTAL USERS
+
+class TotalUsersAPI(APIView):
+
+    def get(self, request):
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
         date = request.GET.get("date")
         month = request.GET.get("month")
         year = request.GET.get("year")
@@ -49,6 +65,7 @@ class TotalUsersAPI(APIView):
         })
 
 
+<<<<<<< HEAD
 # ---------------- ACTIVE USERS ----------------
 
 class ActiveUsersAPI(APIView):
@@ -59,6 +76,13 @@ class ActiveUsersAPI(APIView):
     )
     def get(self, request):
 
+=======
+#  ACTIVE USERS 
+
+class ActiveUsersAPI(APIView):
+
+    def get(self, request):
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
         date = request.GET.get("date")
         month = request.GET.get("month")
         year = request.GET.get("year")
@@ -68,60 +92,95 @@ class ActiveUsersAPI(APIView):
         if date:
             users = users.filter(date_joined__date=date)
         elif month and year:
+<<<<<<< HEAD
             users = users.filter(date_joined__month=int(month), date_joined__year=int(year))
         elif year:
             users = users.filter(date_joined__year=int(year))
+=======
+            users = users.filter(date_joined__month=month, date_joined__year=year)
+        elif year:
+            users = users.filter(date_joined__year=year)
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
         return Response({
             "activeUsers": users.count()
         })
 
 
+<<<<<<< HEAD
 
 # ---------------- TOTAL REVENUE ----------------
+=======
+# TOTAL REVENUE -
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
 class TotalRevenueAPI(APIView):
 
     @swagger_auto_schema(
+<<<<<<< HEAD
         operation_description="Get total revenue with optional filtering by date, month, year or date range",
+=======
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
         manual_parameters=[
             openapi.Parameter(
                 'date',
                 openapi.IN_QUERY,
                 description="Specific date (YYYY-MM-DD)",
+<<<<<<< HEAD
                 type=openapi.TYPE_STRING,
                 required=False
+=======
+                type=openapi.TYPE_STRING
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
             ),
             openapi.Parameter(
                 'month',
                 openapi.IN_QUERY,
                 description="Month number (1-12)",
+<<<<<<< HEAD
                 type=openapi.TYPE_INTEGER,
                 required=False
+=======
+                type=openapi.TYPE_INTEGER
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
             ),
             openapi.Parameter(
                 'year',
                 openapi.IN_QUERY,
                 description="Year (YYYY)",
+<<<<<<< HEAD
                 type=openapi.TYPE_INTEGER,
                 required=False
+=======
+                type=openapi.TYPE_INTEGER
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
             ),
             openapi.Parameter(
                 'start_date',
                 openapi.IN_QUERY,
                 description="Start date (YYYY-MM-DD)",
+<<<<<<< HEAD
                 type=openapi.TYPE_STRING,
                 required=False
+=======
+                type=openapi.TYPE_STRING
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
             ),
             openapi.Parameter(
                 'end_date',
                 openapi.IN_QUERY,
                 description="End date (YYYY-MM-DD)",
+<<<<<<< HEAD
                 type=openapi.TYPE_STRING,
                 required=False
             ),
         ],
         responses={200: openapi.Response('Total revenue')}
+=======
+                type=openapi.TYPE_STRING
+            ),
+        ]
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     )
     def get(self, request):
 
@@ -157,6 +216,7 @@ class TotalRevenueAPI(APIView):
         return Response({
             "totalRevenue": total_revenue
         })
+<<<<<<< HEAD
 #print(SubscriptionPayment.objects.filter(status="success").count())    
 # ---------------- PENDING APPOINTMENTS ----------------
 
@@ -166,6 +226,13 @@ class PendingAppointmentsAPI(APIView):
         operation_description="Get count of pending appointments",
         responses={200: openapi.Response('Pending appointments count')}
     )
+=======
+
+# PENDING APPOINTMENTS 
+
+class PendingAppointmentsAPI(APIView):
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         return Response({
@@ -173,6 +240,7 @@ class PendingAppointmentsAPI(APIView):
         })
 
 
+<<<<<<< HEAD
 # ---------------- USER GROWTH ----------------
 
 class UserGrowthAPI(APIView):
@@ -181,6 +249,12 @@ class UserGrowthAPI(APIView):
         operation_description="Get user growth data over time",
         responses={200: openapi.Response('User growth statistics')}
     )
+=======
+#  USER GROWTH 
+
+class UserGrowthAPI(APIView):
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         user_growth = list(
@@ -196,6 +270,7 @@ class UserGrowthAPI(APIView):
         })
 
 
+<<<<<<< HEAD
 # ---------------- PLAN DISTRIBUTION ----------------
 
 class PlanDistributionAPI(APIView):
@@ -204,6 +279,12 @@ class PlanDistributionAPI(APIView):
         operation_description="Get distribution of subscription plans among users",
         responses={200: openapi.Response('Plan distribution data')}
     )
+=======
+#  PLAN DISTRIBUTION 
+
+class PlanDistributionAPI(APIView):
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         plans = list(
@@ -219,6 +300,7 @@ class PlanDistributionAPI(APIView):
         })
 
 
+<<<<<<< HEAD
 # ---------------- RECENT ACTIVITY ----------------
 
 class RecentActivityAPI(APIView):
@@ -227,6 +309,12 @@ class RecentActivityAPI(APIView):
         operation_description="Get recent user activity (signups and subscriptions)",
         responses={200: openapi.Response('Recent activity data')}
     )
+=======
+#  RECENT ACTIVITY 
+
+class RecentActivityAPI(APIView):
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         recent_signups = list(
@@ -253,6 +341,7 @@ class RecentActivityAPI(APIView):
         })
 
 
+<<<<<<< HEAD
 # ---------------- REVENUE BY PLAN ----------------
 
 class RevenueByPlanAPI(APIView):
@@ -261,6 +350,12 @@ class RevenueByPlanAPI(APIView):
         operation_description="Get revenue breakdown by subscription plan",
         responses={200: openapi.Response('Revenue by plan data')}
     )
+=======
+# REVENUE BY PLAN 
+
+class RevenueByPlanAPI(APIView):
+
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         revenue = list(
@@ -278,10 +373,13 @@ class RevenueByPlanAPI(APIView):
         
 class RevenueDetailsAPI(APIView):
 
+<<<<<<< HEAD
     @swagger_auto_schema(
         operation_description="Get detailed payment records",
         responses={200: openapi.Response('Payment details')}
     )
+=======
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     def get(self, request):
 
         payments = SubscriptionPayment.objects.filter(
@@ -296,6 +394,7 @@ class RevenueDetailsAPI(APIView):
 
         return Response({
             "payments": list(payments)
+<<<<<<< HEAD
         })        
         
         
@@ -348,3 +447,6 @@ class UsersWithPaymentNoProfileAPI(APIView):
                 "error": str(e),
                 "message": "Error retrieving payment data"
             }, status=500)
+=======
+        })        
+>>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
