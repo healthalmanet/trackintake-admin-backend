@@ -9,3 +9,4 @@ class Notification(models.Model):
 
     class Meta:
         db_table = "user_notifications"
+        managed = False

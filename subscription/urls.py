@@ -1,6 +1,5 @@
 from django.urls import path
-from .views import SubscriptionPlanAPI, UpdateSubscriptionPlanAPI,SubscriptionUsageAPI,PaymentAnalyticsAPI, PlanDurationTrackingAPI,get_subscription_plan
-from .utils import get_user_plan_and_upgrade
+from .views import SubscriptionPlanAPI, UpdateSubscriptionPlanAPI, SubscriptionUsageAPI, PaymentAnalyticsAPI, PlanDurationTrackingAPI
 urlpatterns = [
 
     path("plans/", SubscriptionPlanAPI.as_view()),

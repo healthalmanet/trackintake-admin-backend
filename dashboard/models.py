@@ -16,6 +16,6 @@ class UserPro(models.Model):
         managed = False
 
     def __str__(self):
-        return self.full_name,self.email,self.role,self.is_active,self.date_joined,self.id      
+        return self.full_name
     
     

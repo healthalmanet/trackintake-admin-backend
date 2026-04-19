@@ -6,3 +6,5 @@ __pycache__/
 *.pyo
 db.sqlite3
 *.log
+
+users/add_columns.py
