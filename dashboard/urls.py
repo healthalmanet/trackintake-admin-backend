@@ -9,10 +9,13 @@ from .views import (
     PlanDistributionAPI,
     RecentActivityAPI,
     RevenueByPlanAPI,
+    RevenueDetailsAPI,
     UsersWithPaymentNoProfileAPI,
+    UsersWithPaymentNoProfileAPI
 )
 
 urlpatterns = [
+
     path("total-users/", TotalUsersAPI.as_view()),
     path("active-users/", ActiveUsersAPI.as_view()),
     path("total-revenue/", TotalRevenueAPI.as_view()),

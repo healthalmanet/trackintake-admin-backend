@@ -4,12 +4,36 @@ User = get_user_model()
 
 
 class UserProfile(models.Model):
+    NUTRITIONIST_TYPE_CHOICES = [
+        ('inhouse_expert', 'Inhouse Expert'),
+        ('expert', 'Expert'),
+    ]
+
+    PLAN_CHOICES = [
+        ('basic', 'Basic'),
+        ('silver', 'Silver'),
+        ('premium', 'Premium'),
+        ('hero', 'Hero'),  # nutritionist plan
+    ]
+
     full_name = models.CharField(max_length=255)
     email = models.EmailField(unique=True)
     password = models.CharField(max_length=128)
     role = models.CharField(max_length=50)
     is_active = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
+
+    # Patient ka plan (basic/silver/premium)
+    # Nutritionist ka plan (hero)
+    plan = models.CharField(max_length=100, null=True, blank=True, choices=PLAN_CHOICES)
+
+    # Sirf nutritionists ke liye (patients ke liye NULL rahega)
+    nutritionist_type = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        choices=NUTRITIONIST_TYPE_CHOICES
+    )
 
     class Meta:
         db_table = "user_user"
@@ -48,3 +72,5 @@ class UserHealthProfile(models.Model):
     class Meta:
         db_table = '"userProfile_userprofile"'
         managed = False
+
+

@@ -12,7 +12,9 @@ from channels.layers import get_channel_layer
 def create_user_notification(sender, instance, created, **kwargs):
     if created:
         Notification.objects.create(
-            message=f"{instance.full_name} registered"
+            title="New User Created",
+            message=f"{instance.full_name} registered",
+            type="admin"
         )
 
         # -------- REAL-TIME SEND --------

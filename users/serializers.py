@@ -40,3 +40,9 @@ class UserWriteSerializer(serializers.ModelSerializer):
             is_active=validated_data.get('is_active', True)
         )
         return user
+    
+from rest_framework import serializers
+
+class AssignNutritionistSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+    nutritionist_id = serializers.IntegerField()

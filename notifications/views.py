@@ -4,15 +4,96 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import Notification
 from .serializers import NotificationSerializer
+from rest_framework import status
 
 
 class AdminNotificationAPI(APIView):
 
     @swagger_auto_schema(
-        operation_description="Get all notifications",
+        operation_description="Get notifications by type (admin/user/nutritionist)",
+        manual_parameters=[
+            openapi.Parameter(
+                name='type',
+                in_=openapi.IN_QUERY,
+                description="admin | user | nutritionist (default: admin)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            )
+        ],
         responses={200: openapi.Response('List of notifications')}
     )
     def get(self, request):
-        notifications = Notification.objects.all().order_by("-created_at")
+        notif_type = request.query_params.get('type', 'admin')
+        if notif_type not in ['admin', 'user', 'nutritionist']:
+            return Response(
+                {"error": "Invalid type. Choose from: admin, user, nutritionist"},
+                status=400
+            )
+        notifications = Notification.objects.filter(
+            type=notif_type
+        ).order_by("-created_at")
         serializer = NotificationSerializer(notifications, many=True)
-        return Response({"notifications": serializer.data})
+        return Response({
+            "type": notif_type,
+            "total": notifications.count(),
+            "unread_count": notifications.filter(is_read=False).count(),
+            "notifications": serializer.data
+        })
+
+
+# ✅ Single notification mark as read
+class MarkNotificationReadAPI(APIView):
+
+    @swagger_auto_schema(
+        operation_description="Mark a single notification as read",
+        responses={
+            200: "Notification marked as read",
+            404: "Notification not found"
+        }
+    )
+    def patch(self, request, notification_id):
+        try:
+            notification = Notification.objects.get(id=notification_id)
+            notification.is_read = True
+            notification.save()
+            return Response({
+                "message": "Notification marked as read",
+                "id": notification_id
+            }, status=status.HTTP_200_OK)
+        except Notification.DoesNotExist:
+            return Response({"error": "Notification not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+# ✅ Mark ALL notifications as read
+class MarkAllNotificationsReadAPI(APIView):
+
+    @swagger_auto_schema(
+        operation_description="Mark all notifications as read by type",
+        manual_parameters=[
+            openapi.Parameter(
+                name='type',
+                in_=openapi.IN_QUERY,
+                description="admin | user | nutritionist (default: admin)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            )
+        ],
+        responses={200: "All notifications marked as read"}
+    )
+    def patch(self, request):
+        notif_type = request.query_params.get('type', 'admin')
+        if notif_type not in ['admin', 'user', 'nutritionist']:
+            return Response(
+                {"error": "Invalid type. Choose from: admin, user, nutritionist"},
+                status=400
+            )
+        updated = Notification.objects.filter(
+            type=notif_type,
+            is_read=False
+        ).update(is_read=True)
+
+        return Response({
+            "message": "All notifications marked as read",
+            "type": notif_type,
+            "updated_count": updated
+        }, status=status.HTTP_200_OK)

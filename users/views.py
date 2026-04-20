@@ -2,12 +2,13 @@ from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db.models import Q, Count
+from django.db.models.functions import Lower
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from subscription.models import SubscriptionPayment
+from subscription.models import SubscriptionPayment, UserSubscription, SubscriptionPlan
 from users.models import UserProfile, UserHealthProfile
 from notifications.models import Notification
-from .serializers import UserSerializer, UserWriteSerializer
+from .serializers import AssignNutritionistSerializer, UserSerializer, UserWriteSerializer
 from django.core.paginator import Paginator, EmptyPage
 from django.db import connection
 from django.db.utils import OperationalError
@@ -16,11 +17,16 @@ from django.utils.timezone import now
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from rest_framework import status
-from subscription.models import UserSubscription
 from django.utils import timezone
 from datetime import timedelta
-from rest_framework import status
 from django.db import transaction
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import UserProfile
+
+
 
 
 User = get_user_model()
@@ -35,10 +41,9 @@ def check_db_connection():
 
 
 
-# ======================================================================================ASSIGNED NUTRITIONIST======================================================================#
 
 
-# =============================ASSIGNED NUTRITIONIST======================================================================#                 
+# ====================================================================ASSIGNED NUTRITIONIST======================================================================#                 
 class AssignNutritionistAPI(APIView):
     @swagger_auto_schema(
     operation_description="Assign a nutritionist to a user",
@@ -110,12 +115,15 @@ class AssignNutritionistAPI(APIView):
                 # Notifications
                 Notification.objects.create(
                     user=patient,
+                    type="user",                          # User ko jaayegi
                     message=f"Nutritionist {nutritionist_user.full_name} has been assigned to you."
-                )
+                    )
+                
                 Notification.objects.create(
                     user=nutritionist_user,
+                    type="nutritionist",                  # Nutritionist ko jaayegi
                     message=f"You have been assigned to user {patient.full_name}."
-                )
+                    )
 
             return Response({
                 "message": "Nutritionist assigned successfully",
@@ -662,6 +670,189 @@ class UserListCreateView(APIView):
 
 
 
+#==========================================AVAILABLE NUTRITIONISTS FOR PATIENT===========================================#
+
+PLAN_NUTRITIONIST_MAP = {
+    'basic':   ['inhouse_expert'],
+    'silver':  ['expert'],
+    'premium': ['inhouse_expert', 'expert'],
+}
+
+class AvailableNutritionistsView(APIView):
+
+    @swagger_auto_schema(
+        operation_summary="Get available nutritionists for a patient",
+        operation_description="""
+        Patient ke subscription plan ke basis par available nutritionists return karta hai.
+
+        **Plan Rules:**
+        - basic → Inhouse Expert only
+        - silver → Expert only
+        - premium → Both Inhouse Expert + Expert
+
+        Saare nutritionists ka plan hero hota hai.
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                name='patient_id',
+                in_=openapi.IN_QUERY,
+                description="Patient ka User ID",
+                type=openapi.TYPE_INTEGER,
+                required=True,
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description="Available nutritionists list",
+                examples={
+                    "application/json": {
+                        "patient_id": 2,
+                        "patient_plan": "basic",
+                        "allowed_nutritionist_types": ["inhouse_expert"],
+                        "total": 1,
+                        "nutritionists": [
+                            {
+                                "id": 3,
+                                "full_name": "Dr. Abhay",
+                                "email": "nutritionist@gmail.com",
+                                "nutritionist_type": "inhouse_expert",
+                                "plan": "hero"
+                            }
+                        ]
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Bad Request",
+                examples={
+                    "application/json": {
+                        "error": "patient_id is required."
+                    }
+                }
+            ),
+            404: openapi.Response(
+                description="Patient Not Found",
+                examples={
+                    "application/json": {
+                        "error": "Patient not found."
+                    }
+                }
+            ),
+        },
+        tags=["users"]
+    )
+    def get(self, request):
+        patient_id = request.query_params.get('patient_id')
+
+        if not patient_id:
+            return Response({"error": "patient_id is required."}, status=400)
+
+        try:
+            patient = UserProfile.objects.get(id=patient_id, role='user')
+        except UserProfile.DoesNotExist:
+            return Response({"error": "Patient not found."}, status=404)
+
+        patient_plan = patient.plan
+        if not patient_plan:
+            return Response({"error": "Patient ka koi plan assign nahi hai."}, status=400)
+
+        patient_plan = patient_plan.lower().strip()
+        allowed_types = PLAN_NUTRITIONIST_MAP.get(patient_plan)
+
+        if not allowed_types:
+            return Response({
+                "error": f"Invalid plan '{patient_plan}'.",
+                "valid_plans": list(PLAN_NUTRITIONIST_MAP.keys())
+            }, status=400)
+
+        nutritionists = UserProfile.objects.filter(
+            role='nutritionist',
+            plan='hero',
+            nutritionist_type__in=allowed_types,
+            is_active=True
+        ).values('id', 'full_name', 'email', 'nutritionist_type', 'plan')
+
+        return Response({
+            "patient_id": int(patient_id),
+            "patient_plan": patient_plan,
+            "allowed_nutritionist_types": allowed_types,
+            "total": nutritionists.count(),
+            "nutritionists": list(nutritionists)
+        })
+        
+        
+            
+ # ==========================================================================USER LOGIN POST MESSAGE TO ADMIN====================================================================#
+    
 
 
+class UserListCreateView(APIView):
 
+    @swagger_auto_schema(
+        operation_description="Create a new user",
+        request_body=UserWriteSerializer,
+        responses={
+            201: openapi.Response('User created successfully', UserSerializer),
+            400: 'Validation error',
+            503: 'Database connection error'
+        }
+    )
+    def post(self, request):
+        try:
+            # DB check
+            if not check_db_connection():
+                return Response({
+                    "error": "Database connection failed",
+                    "message": "Unable to connect to the database"
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            #  Serializer
+            serializer = UserWriteSerializer(data=request.data)
+
+            if not serializer.is_valid():
+                return Response({
+                    "error": "Validation failed",
+                    "details": serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            #  Save user
+            user = serializer.save()
+
+            #  Admin Notification
+            try:
+                admins = UserProfile.objects.filter(role__iexact="admin")
+                for admin in admins:
+                    Notification.objects.create(
+                        user=admin,
+                        message=f"New user {user.full_name} registered. Please assign a nutritionist."
+                    )
+            except Exception as e:
+                print(f"Admin notification error: {e}")
+
+            #  WebSocket Notification
+            try:
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    "notifications",
+                    {
+                        "type": "send_notification",
+                        "message": f"New user {user.full_name} created 🚀"
+                    }
+                )
+            except Exception as e:
+                print(f"WebSocket error: {e}")
+
+            #  Response
+            return Response({
+                "message": "User created successfully",
+                "data": UserSerializer(user).data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({
+                "error": str(e),
+                "message": "Error creating user"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+        

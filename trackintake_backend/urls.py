@@ -31,6 +31,7 @@ urlpatterns = [
 
     # Users API
     path('api/users/', include('users.urls')),
+    
 
     # Swagger Docs
     re_path(r'^swagger(?P<format>\.json|\.yaml)$',
