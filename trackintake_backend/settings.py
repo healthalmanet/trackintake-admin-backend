@@ -6,15 +6,11 @@ import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # .env load
-<<<<<<< HEAD
 load_dotenv(os.path.join(BASE_DIR, '.env'))
-=======
-load_dotenv(BASE_DIR / ".env")
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
 SECRET_KEY = 'django-insecure-trackintake-admin-secret-key-2026'
 
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['*']
 
@@ -33,22 +29,14 @@ INSTALLED_APPS = [
     'users',
     'subscription',
     'dashboard',
-<<<<<<< HEAD
     'meals',
     'notifications',
     'nutritionist',
-=======
-    'meals'
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 ]
 
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-<<<<<<< HEAD
-=======
-    'corsheaders.middleware.CorsMiddleware',
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -77,7 +65,6 @@ TEMPLATES = [
     },
 ]
 
-<<<<<<< HEAD
 WSGI_APPLICATION = 'trackintake_backend.wsgi.application'
 
 
@@ -90,15 +77,6 @@ DATABASES = {
         conn_max_age=600,
         ssl_require=True
     )
-=======
-
-WSGI_APPLICATION = 'trackintake_backend.wsgi.application'
-
-
-# ✅ DATABASE from .env (DATABASE_URL)
-DATABASES = {
-    'default': dj_database_url.parse(os.getenv("DATABASE_URL"),conn_max_age=600,ssl_require=True)
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 }
 
 
@@ -117,7 +95,6 @@ REST_FRAMEWORK = {
 
 STATIC_URL = '/static/'
 
-<<<<<<< HEAD
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CHANNEL_LAYERS = {
@@ -125,6 +102,3 @@ CHANNEL_LAYERS = {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     },
 }
-=======
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c

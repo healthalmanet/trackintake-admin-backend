@@ -31,10 +31,7 @@ urlpatterns = [
 
     # Users API
     path('api/users/', include('users.urls')),
-<<<<<<< HEAD
     
-=======
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
     # Swagger Docs
     re_path(r'^swagger(?P<format>\.json|\.yaml)$',
@@ -50,13 +47,8 @@ urlpatterns = [
          name='schema-redoc'),
     
     path("api/subscription/", include("subscription.urls")),
-<<<<<<< HEAD
     path("api/dashboard/", include("dashboard.urls")),
     path("api/notifications/", include("notifications.urls")),
     path("api/", include("meals.urls"))
-=======
-    path("api/dashboard/", include("dashboard.urls"))       
-    ,path("api/", include("meals.urls"))
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 
 ]

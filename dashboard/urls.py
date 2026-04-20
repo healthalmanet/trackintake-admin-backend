@@ -9,14 +9,9 @@ from .views import (
     PlanDistributionAPI,
     RecentActivityAPI,
     RevenueByPlanAPI,
-<<<<<<< HEAD
     RevenueDetailsAPI,
     UsersWithPaymentNoProfileAPI,
     UsersWithPaymentNoProfileAPI
-=======
-    RevenueDetailsAPI
-    
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 )
 
 urlpatterns = [
@@ -30,8 +25,5 @@ urlpatterns = [
     path("recent-activity/", RecentActivityAPI.as_view()),
     path("revenue-by-plan/", RevenueByPlanAPI.as_view()),
     path("revenue-details/", RevenueDetailsAPI.as_view()),
-<<<<<<< HEAD
     path("missing-profile-users/", UsersWithPaymentNoProfileAPI.as_view()),
-=======
->>>>>>> 5dca6abf9aa9b4bf10ebf4485cddfab65a7d841c
 ]
