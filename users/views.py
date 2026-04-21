@@ -20,11 +20,6 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 from django.db import transaction
-<<<<<<< HEAD
-=======
-from drf_spectacular.utils import extend_schema, OpenApiParameter
-from drf_spectacular.types import OpenApiTypes
->>>>>>> c43b83e03a15c89ddf2b74f52492411c008d6e1e
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import UserProfile
@@ -425,15 +420,8 @@ class UserPlanNotificationAPI(APIView):
             for sub in expiring_soon:
                 Notification.objects.get_or_create(
                     user_id=sub.user_id,
-<<<<<<< HEAD
                     type="user",
                     message="⚠️ Your plan will expire soon..."
-=======
-                    message=(
-                        "⚠️ Your plan will expire soon. "
-                        "Upgrade your plan now to continue uninterrupted services."
-                    )
->>>>>>> c43b83e03a15c89ddf2b74f52492411c008d6e1e
                 )
                 notified_users.add(sub.user_id)
 
@@ -441,10 +429,7 @@ class UserPlanNotificationAPI(APIView):
             for sub in expired:
                 Notification.objects.get_or_create(
                     user_id=sub.user_id,
-<<<<<<< HEAD
                     type="user",
-=======
->>>>>>> c43b83e03a15c89ddf2b74f52492411c008d6e1e
                     message=(
                         "❌ Your plan has expired. "
                         "Please renew or upgrade your plan to regain access."
@@ -650,14 +635,9 @@ class UserListCreateView(APIView):
                 for admin in admins:
                     Notification.objects.create(
                         user=admin,
-<<<<<<< HEAD
                         type="admin",
                         message=f"New user {user.full_name} registered. Please assign a nutritionist."
                         )
-=======
-                        message=f"New user {user.full_name} registered. Please assign a nutritionist."
-                    )
->>>>>>> c43b83e03a15c89ddf2b74f52492411c008d6e1e
             except Exception as e:
                 print(f"Admin notification error: {e}")
 
@@ -799,82 +779,4 @@ class AvailableNutritionistsView(APIView):
         })
         
         
-<<<<<<< HEAD
  
-=======
-            
- # ==========================================================================USER LOGIN POST MESSAGE TO ADMIN====================================================================#
-    
-
-
-class UserListCreateView(APIView):
-
-    @swagger_auto_schema(
-        operation_description="Create a new user",
-        request_body=UserWriteSerializer,
-        responses={
-            201: openapi.Response('User created successfully', UserSerializer),
-            400: 'Validation error',
-            503: 'Database connection error'
-        }
-    )
-    def post(self, request):
-        try:
-            # DB check
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed",
-                    "message": "Unable to connect to the database"
-                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-            #  Serializer
-            serializer = UserWriteSerializer(data=request.data)
-
-            if not serializer.is_valid():
-                return Response({
-                    "error": "Validation failed",
-                    "details": serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            #  Save user
-            user = serializer.save()
-
-            #  Admin Notification
-            try:
-                admins = UserProfile.objects.filter(role__iexact="admin")
-                for admin in admins:
-                    Notification.objects.create(
-                        user=admin,
-                        message=f"New user {user.full_name} registered. Please assign a nutritionist."
-                    )
-            except Exception as e:
-                print(f"Admin notification error: {e}")
-
-            #  WebSocket Notification
-            try:
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    "notifications",
-                    {
-                        "type": "send_notification",
-                        "message": f"New user {user.full_name} created 🚀"
-                    }
-                )
-            except Exception as e:
-                print(f"WebSocket error: {e}")
-
-            #  Response
-            return Response({
-                "message": "User created successfully",
-                "data": UserSerializer(user).data
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error creating user"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        
-        
->>>>>>> c43b83e03a15c89ddf2b74f52492411c008d6e1e

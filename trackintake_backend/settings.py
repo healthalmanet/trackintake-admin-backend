@@ -102,10 +102,7 @@ CHANNEL_LAYERS = {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     },
 }
-<<<<<<< HEAD
 
 SWAGGER_SETTINGS = {
     'USE_SESSION_AUTH': False,
 }
-=======
->>>>>>> c43b83e03a15c89ddf2b74f52492411c008d6e1e
