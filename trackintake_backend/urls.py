@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path, include, re_path
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
@@ -9,6 +9,14 @@ from drf_yasg import openapi
 # Home route
 def home(request):
     return HttpResponse("Django Backend Running")
+
+
+# Health check endpoint for Render monitoring
+def health_check(request):
+    return JsonResponse({
+        "status": "healthy",
+        "service": "TrackIntake Backend"
+    })
 
 
 # Swagger schema configuration
@@ -26,8 +34,9 @@ schema_view = get_schema_view(
 urlpatterns = [
     path('admin/', admin.site.urls),
 
-    # Home
+    # Home & Health Check
     path('', home, name='home'),
+    path('health/', health_check, name='health'),
 
     # Users API
     path('api/users/', include('users.urls')),
