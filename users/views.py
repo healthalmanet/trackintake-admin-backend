@@ -111,17 +111,26 @@ class AssignNutritionistAPI(APIView):
                 )
 
                 # Notifications
+                # 1. Notification for Patient
                 Notification.objects.create(
                     user=patient,
-                    type="user",                          # User ko jaayegi
+                    type="user",
                     message=f"Nutritionist {nutritionist_user.full_name} has been assigned to you."
-                    )
+                )
                 
+                # 2. Notification for Nutritionist
                 Notification.objects.create(
                     user=nutritionist_user,
-                    type="nutritionist",                  # Nutritionist ko jaayegi
+                    type="nutritionist",
                     message=f"You have been assigned to user {patient.full_name}."
-                    )
+                )
+                
+                # 3. Notification for Admin (single notification for all admins)
+                Notification.objects.create(
+                    user=None,
+                    type="admin",
+                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to {patient.full_name}."
+                )
 
             return Response({
                 "message": "Nutritionist assigned successfully",
