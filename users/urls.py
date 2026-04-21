@@ -14,6 +14,7 @@ from users.views import (
 )   
 
 urlpatterns = [
+    path('', UserListCreateView.as_view(), name='user-list-create'),
     path('create-user', UserListCreateView.as_view(), name='user-create'),
     path("<int:user_id>/", UserDetailView.as_view(), name='user-detail'),
     path("<int:user_id>/health-profile/", UserHealthProfileAPI.as_view(), name='user-health-profile'),
@@ -22,6 +23,6 @@ urlpatterns = [
     path("subscribed/", SubscribedUsersAPI.as_view(), name='subscribed-users'),
     path("assign-nutritionist/", AssignNutritionistAPI.as_view(), name='assign-nutritionist'),
     path('nutritionists/available/', AssignNutritionistAPI.as_view(), name='available-nutritionists'),
-    path('user-list-create/', UserListCreateView.as_view(), name='user-list-create'),
+    path('user-list-create/', UserListCreateView.as_view(), name='user-list-create-alt'),
     path('nutritionists/', NutritionistListAPIView.as_view(), name='nutritionist-list'),
 ]

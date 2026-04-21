@@ -10,6 +10,7 @@ channels==4.3.2
 daphne==4.1.2
 asgiref==3.11.0
 gunicorn==21.2.0
+uvicorn==0.27.0
 whitenoise==6.7.0
 uritemplate==4.2.0
 inflection==0.5.1
