@@ -5,18 +5,14 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Only load .env in development (won't exist on Render)
-if os.path.exists(os.path.join(BASE_DIR, '.env')):
-    load_dotenv(os.path.join(BASE_DIR, '.env'))
+# .env load
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
-# Security: Use environment variable for SECRET_KEY
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-trackintake-admin-secret-key-2026')
+SECRET_KEY = 'django-insecure-trackintake-admin-secret-key-2026'
 
-# Debug mode from environment
-DEBUG = os.getenv('DEBUG', 'False') == 'True'
+DEBUG = False
 
-# Allowed hosts from environment variable
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = ['*']
 
 
 INSTALLED_APPS = [
@@ -41,7 +37,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # Serve static files in production
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -75,24 +70,19 @@ WSGI_APPLICATION = 'trackintake_backend.wsgi.application'
 
 
 #
-# Database Configuration
+# ✅ DEBUG check
+print("DATABASE_URL:", os.getenv("DATABASE_URL"))
+
 DATABASES = {
     'default': dj_database_url.config(
-        default='sqlite:///db.sqlite3',  # Fallback for local development
         conn_max_age=600,
-        ssl_require=not DEBUG  # Only require SSL in production
+        ssl_require=True
     )
 }
 
 
-# CORS Configuration
-# In production, only allow specific origins
-CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all in development
-
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
-    'http://localhost:5173,http://localhost:3000'
-).split(',') if not DEBUG else []
+# CORS
+CORS_ALLOW_ALL_ORIGINS = True
 
 
 REST_FRAMEWORK = {
@@ -104,41 +94,16 @@ REST_FRAMEWORK = {
 }
 
 
-# Static Files Configuration
 STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-STATICFILES_DIRS = []
-
-# WhiteNoise configuration for serving static files
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Channels Configuration
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     },
 }
 
-# Logging Configuration
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO' if not DEBUG else 'DEBUG',
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-    },
+SWAGGER_SETTINGS = {
+    'USE_SESSION_AUTH': False,
 }
