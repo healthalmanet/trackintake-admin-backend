@@ -425,12 +425,12 @@ class UserPlanNotificationAPI(APIView):
                     message="⚠️ Your plan will expire soon. Upgrade your plan now to continue uninterrupted services."
                 )
                 
-                for admin in admins:
-                    Notification.objects.get_or_create(
-                        user=admin,
-                        type="admin",
-                        message=f"⚠️ {user_name}'s plan is expiring in 3 days. Please follow up."
-                        )
+                # for admin in admins:
+                #     Notification.objects.get_or_create(
+                #         user=admin,
+                #         type="admin",
+                #         message=f"⚠️ {user_name}'s plan is expiring in 3 days. Please follow up."
+                #         )
                 notified_users.add(sub.user_id)
                 
 
@@ -449,9 +449,9 @@ class UserPlanNotificationAPI(APIView):
                         user=admin,
                         type="admin",
                         message=f"❌ {user_name}'s plan has expired. Please follow up."
-                    )
+                        )
                 notified_users.add(sub.user_id)
-
+                
             return Response({
                 "message": "Notifications sent successfully",
                 "total_users_notified": len(notified_users),
