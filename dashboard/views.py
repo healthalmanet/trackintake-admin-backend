@@ -10,7 +10,7 @@ from drf_yasg import openapi
 from dashboard.models import UserPro
 from django.contrib.auth import get_user_model
 from users.models import UserProfile
-from subscription.models import SubscriptionPayment, UserSubscription
+from subscription.models import SubscriptionPayment, UserSubscription, SubscriptionPlan
 from django.db import connection
 User=get_user_model()
 def check_db_connection():
@@ -263,7 +263,7 @@ class RevenueByPlanAPI(APIView):
     )
     def get(self, request):
 
-        revenue = list(
+        revenue_data = list(
             SubscriptionPayment.objects
             .filter(status="success")
             .values("plan_id")
@@ -271,8 +271,13 @@ class RevenueByPlanAPI(APIView):
             .order_by("-total_revenue")
         )
 
+        # Add plan names to the response
+        for item in revenue_data:
+            plan = SubscriptionPlan.objects.filter(id=item["plan_id"]).first()
+            item["plan_name"] = plan.name if plan else f"Plan {item['plan_id']}"
+
         return Response({
-            "revenueByPlan": revenue
+            "revenueByPlan": revenue_data
         })
         
         
