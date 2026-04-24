@@ -12,6 +12,10 @@ from django.contrib.auth import get_user_model
 from users.models import UserProfile
 from subscription.models import SubscriptionPayment, UserSubscription, SubscriptionPlan
 from django.db import connection
+from django.views.decorators.http import require_http_methods
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+
 User=get_user_model()
 def check_db_connection():
     """Check if database is connected"""
@@ -44,8 +48,10 @@ class TotalUsersAPI(APIView):
         elif year:
             users = users.filter(date_joined__year=year)
 
+        count = users.count()
+        print(f"TotalUsersAPI: Found {count} users")
         return Response({
-            "totalUsers": users.count()
+            "totalUsers": count
         })
 
 
@@ -213,6 +219,11 @@ class PlanDistributionAPI(APIView):
             .annotate(users=Count("user_id"))
             .order_by("-users")
         )
+
+        # Add plan names to avoid frontend race condition
+        for item in plans:
+            plan = SubscriptionPlan.objects.filter(id=item["plan_id"]).first()
+            item["plan_name"] = plan.name if plan else f"Plan {item['plan_id']}"
 
         return Response({
             "planDistribution": plans

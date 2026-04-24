@@ -203,39 +203,55 @@ class PaymentAnalyticsAPI(APIView):
         responses={200: openapi.Response('Payment analytics data')}
     )
     def get(self, request):
+        try:
+            month = request.query_params.get("month")
+            year = request.query_params.get("year")
+            date = request.query_params.get("date")
 
-        month = request.query_params.get("month")
-        year = request.query_params.get("year")
-        date = request.query_params.get("date")
+            payments = SubscriptionPayment.objects.all()
 
-        payments = SubscriptionPayment.objects.all()
+            if date:
+                payments = payments.filter(created_at__date=date)
+            elif month and year:
+                payments = payments.filter(created_at__month=month, created_at__year=year)
+            elif year:
+                payments = payments.filter(created_at__year=year)
 
-        if date:
-            payments = payments.filter(created_at__date=date)
-        elif month and year:
-            payments = payments.filter(created_at__month=month, created_at__year=year)
-        elif year:
-            payments = payments.filter(created_at__year=year)
+            total_payments = payments.count()
+            total_revenue = payments.filter(status="success").aggregate(total=Sum("amount"))["total"] or 0
 
-        total_payments = payments.count()
-        total_revenue = payments.filter(status="success").aggregate(total=Sum("amount"))["total"] or 0
+            # Revenue per plan with plan names
+            from django.db.models import Sum as _Sum
+            revenue_per_plan_qs = (
+                payments.filter(status="success")
+                .values("plan_id")
+                .annotate(revenue=_Sum("amount"))
+            )
+            revenue_per_plan = []
+            for r in revenue_per_plan_qs:
+                plan = SubscriptionPlan.objects.filter(id=r["plan_id"]).first()
+                revenue_per_plan.append({
+                    "plan_id": r["plan_id"],
+                    "plan_name": plan.name if plan else f"Plan {r['plan_id']}",
+                    "revenue": r["revenue"]
+                })
 
-        # Revenue per plan
-        from django.db.models import Sum as _Sum
-        revenue_per_plan_qs = (
-            payments.filter(status="success")
-            .values("plan_id")
-            .annotate(revenue=_Sum("amount"))
-        )
-        revenue_per_plan = [{"plan_id": r["plan_id"], "revenue": r["revenue"]} for r in revenue_per_plan_qs]
-
-        return Response({
-            "totalPayments": total_payments,
-            "totalRevenue": total_revenue,
-            "successPayments": payments.filter(status="success").count(),
-            "failedPayments": payments.filter(status="failed").count(),
-            "revenuePerPlan": revenue_per_plan,
-        })
+            return Response({
+                "totalPayments": total_payments,
+                "totalRevenue": total_revenue,
+                "successPayments": payments.filter(status="success").count(),
+                "failedPayments": payments.filter(status="failed").count(),
+                "revenuePerPlan": revenue_per_plan,
+            })
+        except Exception as e:
+            return Response({
+                "error": str(e),
+                "totalPayments": 0,
+                "totalRevenue": 0,
+                "successPayments": 0,
+                "failedPayments": 0,
+                "revenuePerPlan": [],
+            }, status=500)
 
 
 # --------- PLAN STATUS ---------

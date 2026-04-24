@@ -1,7 +1,8 @@
 from django.urls import path
-from .views import AdminNotificationAPI, MarkNotificationReadAPI, MarkAllNotificationsReadAPI
+from .views import AdminNotificationAPI, MarkNotificationReadAPI, MarkAllNotificationsReadAPI, GenericNotificationAPI
 
 urlpatterns = [
+    path("", GenericNotificationAPI.as_view()),  # Generic endpoint for /api/notifications/
     path("admin-notifications/", AdminNotificationAPI.as_view()),
     path("admin-notifications/<int:notification_id>/read/", MarkNotificationReadAPI.as_view()),
     path("admin-notifications/mark-all-read/", MarkAllNotificationsReadAPI.as_view()),
