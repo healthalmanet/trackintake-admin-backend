@@ -20,8 +20,9 @@ urlpatterns = [
     path("payment-no-profile/", UsersWithPaymentNoProfileAPI.as_view()),
     path("plan-renewal/", UserPlanNotificationAPI.as_view(), name='plan-renewal-notifications'),
     path("subscribed/", SubscribedUsersAPI.as_view(), name='subscribed-users'),
-    path('assign-nutritionist/', AssignNutritionistAPI.as_view(), name='assign-nutritionist'),
     path('nutritionists/available/', AssignNutritionistAPI.as_view(), name='available-nutritionists'),
-    path('user-list-create/', UserListCreateView.as_view(), name='user-list-create'),
-    path('nutritionists/', NutritionistListAPIView.as_view(), name='nutritionist-list'),
+     path('user-list-create/', UserListCreateView.as_view(), name='user-list-create'),
+     path('nutritionists/', NutritionistListAPIView.as_view(), name='nutritionist-list'),
+     
+
 ]

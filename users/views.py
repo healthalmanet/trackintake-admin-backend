@@ -111,26 +111,17 @@ class AssignNutritionistAPI(APIView):
                 )
 
                 # Notifications
-                # 1. Notification for Patient
                 Notification.objects.create(
                     user=patient,
-                    type="user",
+                    type="user",                          # User ko jaayegi
                     message=f"Nutritionist {nutritionist_user.full_name} has been assigned to you."
-                )
+                    )
                 
-                # 2. Notification for Nutritionist
                 Notification.objects.create(
                     user=nutritionist_user,
-                    type="nutritionist",
+                    type="nutritionist",                  # Nutritionist ko jaayegi
                     message=f"You have been assigned to user {patient.full_name}."
-                )
-                
-                # 3. Notification for Admin (single notification for all admins)
-                Notification.objects.create(
-                    user=None,
-                    type="admin",
-                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to {patient.full_name}."
-                )
+                    )
 
             return Response({
                 "message": "Nutritionist assigned successfully",
@@ -413,39 +404,54 @@ class UserPlanNotificationAPI(APIView):
             today = timezone.now().date()
             upcoming_date = today + timedelta(days=3)
 
-            # Expiring soon (Upgrade Reminder)
             expiring_soon = UserSubscription.objects.filter(
                 end_date__range=[today, upcoming_date]
             )
-
-            # Already expired
             expired = UserSubscription.objects.filter(
                 end_date__lt=today
             )
 
             notified_users = set()
+            admins = UserProfile.objects.filter(role__iexact="admin")
 
-            # Expiring soon → Upgrade suggestion
+            # Expiring soon
             for sub in expiring_soon:
+                user = UserProfile.objects.filter(id=sub.user_id).first()
+                user_name = user.full_name if user else f"User #{sub.user_id}"
+
                 Notification.objects.get_or_create(
                     user_id=sub.user_id,
                     type="user",
-                    message="⚠️ Your plan will expire soon..."
+                    message="⚠️ Your plan will expire soon. Upgrade your plan now to continue uninterrupted services."
                 )
+                
+                # for admin in admins:
+                #     Notification.objects.get_or_create(
+                #         user=admin,
+                #         type="admin",
+                #         message=f"⚠️ {user_name}'s plan is expiring in 3 days. Please follow up."
+                #         )
                 notified_users.add(sub.user_id)
+                
 
-            #  Expired → Renewal + Upgrade
+            # Expired
             for sub in expired:
+                user = UserProfile.objects.filter(id=sub.user_id).first()
+                user_name = user.full_name if user else f"User #{sub.user_id}"
+
                 Notification.objects.get_or_create(
                     user_id=sub.user_id,
                     type="user",
-                    message=(
-                        "❌ Your plan has expired. "
-                        "Please renew or upgrade your plan to regain access."
-                    )
+                    message="❌ Your plan has expired. Please renew or upgrade your plan to regain access."
                 )
+                for admin in admins:
+                    Notification.objects.get_or_create(
+                        user=admin,
+                        type="admin",
+                        message=f"❌ {user_name}'s plan has expired. Please follow up."
+                        )
                 notified_users.add(sub.user_id)
-
+                
             return Response({
                 "message": "Notifications sent successfully",
                 "total_users_notified": len(notified_users),
