@@ -34,7 +34,6 @@ class AdminNotificationAPI(APIView):
             user_profile = UserProfile.objects.filter(user=request.user).first()
 
         notifications = Notification.objects.filter(
-            Q(user=user_profile) | Q(user__isnull=True),
             type=notif_type
         ).order_by("-created_at")
 
@@ -67,7 +66,6 @@ class MarkNotificationReadAPI(APIView):
 
             # ✅ Fixed: Q filter same as GET API
             notification = Notification.objects.get(
-                Q(user=user_profile) | Q(user__isnull=True),
                 id=notification_id,
             )
             notification.is_read = True
@@ -102,18 +100,8 @@ class MarkAllNotificationsReadAPI(APIView):
     )
     def patch(self, request):
         notif_type = request.query_params.get('type', 'admin')
-        if notif_type not in ['admin', 'user', 'nutritionist']:
-            return Response(
-                {"error": "Invalid type. Choose from: admin, user, nutritionist"},
-                status=400
-            )
-
-        user_profile = None
-        if request.user.is_authenticated:
-            user_profile = UserProfile.objects.filter(user=request.user).first()
-
+        
         updated = Notification.objects.filter(
-            Q(user=user_profile) | Q(user__isnull=True),
             type=notif_type,
             is_read=False
         ).update(is_read=True)

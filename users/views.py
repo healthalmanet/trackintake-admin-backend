@@ -646,13 +646,11 @@ class UserListCreateView(APIView):
 
             #  Admin Notification
             try:
-                admins = UserProfile.objects.filter(role__iexact="admin")
-                for admin in admins:
-                    Notification.objects.create(
-                        user=admin,
-                        type="admin",
-                        message=f"New user {user.full_name} registered. Please assign a nutritionist."
-                        )
+                Notification.objects.create(
+                    user=None, 
+                    type="admin",
+                    message=f"New user {user.full_name} registered. Please assign a nutritionist."
+                    )
             except Exception as e:
                 print(f"Admin notification error: {e}")
 
@@ -686,6 +684,7 @@ class UserListCreateView(APIView):
 #==========================================AVAILABLE NUTRITIONISTS FOR PATIENT===========================================#
 
 PLAN_NUTRITIONIST_MAP = {
+    'free':[ ],
     'basic':   ['inhouse_expert'],
     'silver':  ['expert'],
     'premium': ['inhouse_expert', 'expert'],
@@ -765,25 +764,42 @@ class AvailableNutritionistsView(APIView):
         except UserProfile.DoesNotExist:
             return Response({"error": "Patient not found."}, status=404)
 
-        patient_plan = patient.plan
+        # 🔥 Plan fetch (IMPORTANT)
+        from subscription.models import UserSubscription, SubscriptionPlan
+
+# Get active subscription
+        subscription = UserSubscription.objects.filter(
+            user_id=patient.id,
+            is_active=True
+        ).first()
+
+        if not subscription:
+            return Response({"error": "No active subscription"}, status=400)
+
+        plan = SubscriptionPlan.objects.filter(id=subscription.plan_id).first()
+        if not plan:
+            return Response({"error": "Plan not found"}, status=400)
+
+        patient_plan = plan.name.lower().strip()
         if not patient_plan:
             return Response({"error": "Patient ka koi plan assign nahi hai."}, status=400)
+        
 
-        patient_plan = patient_plan.lower().strip()
         allowed_types = PLAN_NUTRITIONIST_MAP.get(patient_plan)
 
-        if not allowed_types:
+        if allowed_types is None:
             return Response({
-                "error": f"Invalid plan '{patient_plan}'.",
-                "valid_plans": list(PLAN_NUTRITIONIST_MAP.keys())
+                "error": f"Invalid plan '{patient_plan}'"
             }, status=400)
 
+        # ✅ MAIN FILTER
         nutritionists = UserProfile.objects.filter(
             role='nutritionist',
-            plan='hero',
             nutritionist_type__in=allowed_types,
             is_active=True
-        ).values('id', 'full_name', 'email', 'nutritionist_type', 'plan')
+        ).values(
+            'id', 'full_name', 'email', 'nutritionist_type'
+        )
 
         return Response({
             "patient_id": int(patient_id),
@@ -792,6 +808,3 @@ class AvailableNutritionistsView(APIView):
             "total": nutritionists.count(),
             "nutritionists": list(nutritionists)
         })
-        
-        
- 

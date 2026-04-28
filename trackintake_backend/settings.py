@@ -10,7 +10,7 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 SECRET_KEY = 'django-insecure-trackintake-admin-secret-key-2026'
 
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['*']
 
@@ -76,7 +76,7 @@ print("DATABASE_URL:", os.getenv("DATABASE_URL"))
 DATABASES = {
     'default': dj_database_url.config(
         conn_max_age=600,
-        ssl_require=True
+        ssl_require=False
     )
 }
 
