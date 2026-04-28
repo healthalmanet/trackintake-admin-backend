@@ -57,7 +57,7 @@ urlpatterns = [
     
     path("api/subscription/", include("subscription.urls")),
     path("api/dashboard/", include("dashboard.urls")),
-    path("api/notifications/", include("notifications.urls")),
+    path("api/", include("notifications.urls")),
     path("api/", include("meals.urls"))
 
 ]

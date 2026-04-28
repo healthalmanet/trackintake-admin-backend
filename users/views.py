@@ -413,39 +413,54 @@ class UserPlanNotificationAPI(APIView):
             today = timezone.now().date()
             upcoming_date = today + timedelta(days=3)
 
-            # Expiring soon (Upgrade Reminder)
             expiring_soon = UserSubscription.objects.filter(
                 end_date__range=[today, upcoming_date]
             )
-
-            # Already expired
             expired = UserSubscription.objects.filter(
                 end_date__lt=today
             )
 
             notified_users = set()
+            admins = UserProfile.objects.filter(role__iexact="admin")
 
-            # Expiring soon → Upgrade suggestion
+            # Expiring soon
             for sub in expiring_soon:
+                user = UserProfile.objects.filter(id=sub.user_id).first()
+                user_name = user.full_name if user else f"User #{sub.user_id}"
+
                 Notification.objects.get_or_create(
                     user_id=sub.user_id,
                     type="user",
-                    message="⚠️ Your plan will expire soon..."
+                    message="⚠️ Your plan will expire soon. Upgrade your plan now to continue uninterrupted services."
                 )
+                
+                # for admin in admins:
+                #     Notification.objects.get_or_create(
+                #         user=admin,
+                #         type="admin",
+                #         message=f"⚠️ {user_name}'s plan is expiring in 3 days. Please follow up."
+                #         )
                 notified_users.add(sub.user_id)
+                
 
-            #  Expired → Renewal + Upgrade
+            # Expired
             for sub in expired:
+                user = UserProfile.objects.filter(id=sub.user_id).first()
+                user_name = user.full_name if user else f"User #{sub.user_id}"
+
                 Notification.objects.get_or_create(
                     user_id=sub.user_id,
                     type="user",
-                    message=(
-                        "❌ Your plan has expired. "
-                        "Please renew or upgrade your plan to regain access."
-                    )
+                    message="❌ Your plan has expired. Please renew or upgrade your plan to regain access."
                 )
+                for admin in admins:
+                    Notification.objects.get_or_create(
+                        user=admin,
+                        type="admin",
+                        message=f"❌ {user_name}'s plan has expired. Please follow up."
+                        )
                 notified_users.add(sub.user_id)
-
+                
             return Response({
                 "message": "Notifications sent successfully",
                 "total_users_notified": len(notified_users),
@@ -640,13 +655,11 @@ class UserListCreateView(APIView):
 
             #  Admin Notification
             try:
-                admins = UserProfile.objects.filter(role__iexact="admin")
-                for admin in admins:
-                    Notification.objects.create(
-                        user=admin,
-                        type="admin",
-                        message=f"New user {user.full_name} registered. Please assign a nutritionist."
-                        )
+                Notification.objects.create(
+                    user=None, 
+                    type="admin",
+                    message=f"New user {user.full_name} registered. Please assign a nutritionist."
+                    )
             except Exception as e:
                 print(f"Admin notification error: {e}")
 
@@ -680,6 +693,7 @@ class UserListCreateView(APIView):
 #==========================================AVAILABLE NUTRITIONISTS FOR PATIENT===========================================#
 
 PLAN_NUTRITIONIST_MAP = {
+    'free':[ ],
     'basic':   ['inhouse_expert'],
     'silver':  ['expert'],
     'premium': ['inhouse_expert', 'expert'],
@@ -759,25 +773,42 @@ class AvailableNutritionistsView(APIView):
         except UserProfile.DoesNotExist:
             return Response({"error": "Patient not found."}, status=404)
 
-        patient_plan = patient.plan
+        # 🔥 Plan fetch (IMPORTANT)
+        from subscription.models import UserSubscription, SubscriptionPlan
+
+# Get active subscription
+        subscription = UserSubscription.objects.filter(
+            user_id=patient.id,
+            is_active=True
+        ).first()
+
+        if not subscription:
+            return Response({"error": "No active subscription"}, status=400)
+
+        plan = SubscriptionPlan.objects.filter(id=subscription.plan_id).first()
+        if not plan:
+            return Response({"error": "Plan not found"}, status=400)
+
+        patient_plan = plan.name.lower().strip()
         if not patient_plan:
             return Response({"error": "Patient ka koi plan assign nahi hai."}, status=400)
+        
 
-        patient_plan = patient_plan.lower().strip()
         allowed_types = PLAN_NUTRITIONIST_MAP.get(patient_plan)
 
-        if not allowed_types:
+        if allowed_types is None:
             return Response({
-                "error": f"Invalid plan '{patient_plan}'.",
-                "valid_plans": list(PLAN_NUTRITIONIST_MAP.keys())
+                "error": f"Invalid plan '{patient_plan}'"
             }, status=400)
 
+        # ✅ MAIN FILTER
         nutritionists = UserProfile.objects.filter(
             role='nutritionist',
-            plan='hero',
             nutritionist_type__in=allowed_types,
             is_active=True
-        ).values('id', 'full_name', 'email', 'nutritionist_type', 'plan')
+        ).values(
+            'id', 'full_name', 'email', 'nutritionist_type'
+        )
 
         return Response({
             "patient_id": int(patient_id),
@@ -786,6 +817,3 @@ class AvailableNutritionistsView(APIView):
             "total": nutritionists.count(),
             "nutritionists": list(nutritionists)
         })
-        
-        
- 

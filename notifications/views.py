@@ -5,6 +5,9 @@ from drf_yasg import openapi
 from .models import Notification
 from .serializers import NotificationSerializer
 from rest_framework import status
+from rest_framework.permissions import AllowAny
+from django.db.models import Q
+from .models import UserProfile
 
 
 class GenericNotificationAPI(APIView):
@@ -41,6 +44,7 @@ class GenericNotificationAPI(APIView):
 
 
 class AdminNotificationAPI(APIView):
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_description="Get notifications by type (admin/user/nutritionist)",
@@ -57,15 +61,17 @@ class AdminNotificationAPI(APIView):
     )
     def get(self, request):
         notif_type = request.query_params.get('type', 'admin')
-        if notif_type not in ['admin', 'user', 'nutritionist']:
-            return Response(
-                {"error": "Invalid type. Choose from: admin, user, nutritionist"},
-                status=400
-            )
+
+        user_profile = None
+        if request.user.is_authenticated:
+            user_profile = UserProfile.objects.filter(user=request.user).first()
+
         notifications = Notification.objects.filter(
             type=notif_type
         ).order_by("-created_at")
+
         serializer = NotificationSerializer(notifications, many=True)
+
         return Response({
             "type": notif_type,
             "total": notifications.count(),
@@ -76,6 +82,7 @@ class AdminNotificationAPI(APIView):
 
 # ✅ Single notification mark as read
 class MarkNotificationReadAPI(APIView):
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_description="Mark a single notification as read",
@@ -86,7 +93,14 @@ class MarkNotificationReadAPI(APIView):
     )
     def patch(self, request, notification_id):
         try:
-            notification = Notification.objects.get(id=notification_id)
+            user_profile = None
+            if request.user.is_authenticated:
+                user_profile = UserProfile.objects.filter(user=request.user).first()
+
+            # ✅ Fixed: Q filter same as GET API
+            notification = Notification.objects.get(
+                id=notification_id,
+            )
             notification.is_read = True
             notification.save()
             return Response({
@@ -94,11 +108,15 @@ class MarkNotificationReadAPI(APIView):
                 "id": notification_id
             }, status=status.HTTP_200_OK)
         except Notification.DoesNotExist:
-            return Response({"error": "Notification not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Notification not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 
 # ✅ Mark ALL notifications as read
 class MarkAllNotificationsReadAPI(APIView):
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_description="Mark all notifications as read by type",
@@ -115,11 +133,7 @@ class MarkAllNotificationsReadAPI(APIView):
     )
     def patch(self, request):
         notif_type = request.query_params.get('type', 'admin')
-        if notif_type not in ['admin', 'user', 'nutritionist']:
-            return Response(
-                {"error": "Invalid type. Choose from: admin, user, nutritionist"},
-                status=400
-            )
+        
         updated = Notification.objects.filter(
             type=notif_type,
             is_read=False

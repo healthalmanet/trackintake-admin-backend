@@ -14,7 +14,7 @@ def payment_notification(sender, instance, created, **kwargs):
     if created and instance.status.lower() == "success":
 
         Notification.objects.create(
-            title="Plan Purchased",
+            # title="Plan Purchased",
             message=f"User {instance.user_id} purchased plan {instance.plan_id}",
             type="admin"
         )

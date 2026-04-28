@@ -36,6 +36,7 @@ INSTALLED_APPS = [
 
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -76,7 +77,7 @@ print("DATABASE_URL:", os.getenv("DATABASE_URL"))
 DATABASES = {
     'default': dj_database_url.config(
         conn_max_age=600,
-        ssl_require=True
+        ssl_require=False
     )
 }
 

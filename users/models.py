@@ -22,6 +22,8 @@ class UserProfile(models.Model):
     role = models.CharField(max_length=50)
     is_active = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
+    is_admin = models.BooleanField(default=False) 
+    is_superuser = models.BooleanField(default=False)
 
     # Patient ka plan (basic/silver/premium)
     # Nutritionist ka plan (hero)
