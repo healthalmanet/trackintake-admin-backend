@@ -10,12 +10,8 @@ from drf_yasg import openapi
 from dashboard.models import UserPro
 from django.contrib.auth import get_user_model
 from users.models import UserProfile
-from subscription.models import SubscriptionPayment, UserSubscription, SubscriptionPlan
+from subscription.models import SubscriptionPayment, UserSubscription
 from django.db import connection
-from django.views.decorators.http import require_http_methods
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-
 User=get_user_model()
 def check_db_connection():
     """Check if database is connected"""
@@ -44,14 +40,12 @@ class TotalUsersAPI(APIView):
         if date:
             users = users.filter(date_joined__date=date)
         elif month and year:
-            users = users.filter(date_joined__month=month, date_joined__year=year)
+            users = users.filter(date_joined__month=int(month), date_joined__year=int(year))
         elif year:
-            users = users.filter(date_joined__year=year)
+            users = users.filter(date_joined__year=int(year))
 
-        count = users.count()
-        print(f"TotalUsersAPI: Found {count} users")
         return Response({
-            "totalUsers": count
+            "totalUsers": users.count()
         })
 
 
@@ -144,12 +138,12 @@ class TotalRevenueAPI(APIView):
 
         elif month and year:
             payments = payments.filter(
-                created_at__month=month,
-                created_at__year=year
+                created_at__month=int(month),
+                created_at__year=int(year)
             )
 
         elif year:
-            payments = payments.filter(created_at__year=year)
+            payments = payments.filter(created_at__year=int(year))
 
         elif start_date and end_date:
             payments = payments.filter(
@@ -220,11 +214,6 @@ class PlanDistributionAPI(APIView):
             .order_by("-users")
         )
 
-        # Add plan names to avoid frontend race condition
-        for item in plans:
-            plan = SubscriptionPlan.objects.filter(id=item["plan_id"]).first()
-            item["plan_name"] = plan.name if plan else f"Plan {item['plan_id']}"
-
         return Response({
             "planDistribution": plans
         })
@@ -274,7 +263,7 @@ class RevenueByPlanAPI(APIView):
     )
     def get(self, request):
 
-        revenue_data = list(
+        revenue = list(
             SubscriptionPayment.objects
             .filter(status="success")
             .values("plan_id")
@@ -282,13 +271,8 @@ class RevenueByPlanAPI(APIView):
             .order_by("-total_revenue")
         )
 
-        # Add plan names to the response
-        for item in revenue_data:
-            plan = SubscriptionPlan.objects.filter(id=item["plan_id"]).first()
-            item["plan_name"] = plan.name if plan else f"Plan {item['plan_id']}"
-
         return Response({
-            "revenueByPlan": revenue_data
+            "revenueByPlan": revenue
         })
         
         

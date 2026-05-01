@@ -10,39 +10,6 @@ from django.db.models import Q
 from .models import UserProfile
 
 
-class GenericNotificationAPI(APIView):
-    """Generic endpoint for /api/notifications/ - returns admin notifications by default"""
-    
-    @swagger_auto_schema(
-        operation_description="Get notifications (defaults to admin type)",
-        manual_parameters=[
-            openapi.Parameter(
-                name='type',
-                in_=openapi.IN_QUERY,
-                description="admin | user | nutritionist (default: admin)",
-                type=openapi.TYPE_STRING,
-                required=False,
-            )
-        ],
-        responses={200: openapi.Response('List of notifications')}
-    )
-    def get(self, request):
-        notif_type = request.query_params.get('type', 'admin')
-        if notif_type not in ['admin', 'user', 'nutritionist']:
-            notif_type = 'admin'
-        
-        notifications = Notification.objects.filter(
-            type=notif_type
-        ).order_by("-created_at")
-        serializer = NotificationSerializer(notifications, many=True)
-        return Response({
-            "notifications": serializer.data,
-            "type": notif_type,
-            "total": notifications.count(),
-            "unread_count": notifications.filter(is_read=False).count(),
-        })
-
-
 class AdminNotificationAPI(APIView):
     permission_classes = [AllowAny]
 

@@ -16,3 +16,7 @@ class Notification(models.Model):
 
     class Meta:
         db_table = "user_notifications"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.message[:50]} - {self.type}"

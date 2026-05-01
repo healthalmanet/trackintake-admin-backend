@@ -105,11 +105,23 @@ class UpdateSubscriptionPlanAPI(APIView):
 # --------- PAYMENT SUCCESS HANDLER (🔥 IMPORTANT) ---------
 def handle_payment_success(payment):
 
-    # ✅ Save notification
+    # ✅ Save notification for admin
     Notification.objects.create(
-        user_id=payment.user_id,
-        message=f"Payment received from user {payment.user_id} 💳"
+        user=None,
+        type="admin",
+        message=f"User purchased a plan. Payment ID: {payment.id}, Amount: {payment.amount}"
     )
+
+    # ✅ Save notification for user
+    user = UserProfile.objects.filter(id=payment.user_id).first()
+    if user:
+        plan = SubscriptionPlan.objects.filter(id=payment.plan_id).first()
+        plan_name = plan.name if plan else f"Plan #{payment.plan_id}"
+        Notification.objects.create(
+            user=user,
+            type="user",
+            message=f"Your payment for {plan_name} plan has been processed successfully."
+        )
 
     # ✅ Real-time WebSocket notification
     channel_layer = get_channel_layer()
@@ -121,6 +133,103 @@ def handle_payment_success(payment):
             "message": f"Payment received from user {payment.user_id} 💳"
         }
     )
+
+
+# --------- CREATE PAYMENT ---------
+class CreatePaymentAPI(APIView):
+    @swagger_auto_schema(
+        operation_description="Create a payment for a subscription plan",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "user_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="User ID"),
+                "plan_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="Plan ID"),
+                "amount": openapi.Schema(type=openapi.TYPE_INTEGER, description="Payment amount"),
+                "status": openapi.Schema(type=openapi.TYPE_STRING, description="Payment status (success/failed)", default="success"),
+            },
+            required=["user_id", "plan_id", "amount"]
+        ),
+        responses={
+            201: 'Payment created successfully',
+            400: 'Validation error',
+            404: 'User or plan not found'
+        }
+    )
+    def post(self, request):
+        try:
+            user_id = request.data.get("user_id")
+            plan_id = request.data.get("plan_id")
+            amount = request.data.get("amount")
+            payment_status = request.data.get("status", "success")
+
+            if not user_id or not plan_id or not amount:
+                return Response({"error": "user_id, plan_id, and amount are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Verify user exists
+            user = UserProfile.objects.filter(id=user_id).first()
+            if not user:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Verify plan exists
+            plan = SubscriptionPlan.objects.filter(id=plan_id).first()
+            if not plan:
+                return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Create payment using raw SQL to handle razorpay_order_id
+            from django.db import connection
+            import uuid
+            
+            razorpay_order_id = f"order_{uuid.uuid4().hex[:12]}"
+            
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO subscriptions_payment 
+                    (user_id, plan_id, amount, status, created_at, razorpay_order_id) 
+                    VALUES (%s, %s, %s, %s, %s, %s)""",
+                    [user_id, plan_id, amount, payment_status, timezone.now(), razorpay_order_id]
+                )
+            
+            # Fetch the created payment
+            payment = SubscriptionPayment.objects.filter(
+                user_id=user_id,
+                plan_id=plan_id,
+                amount=amount
+            ).order_by('-created_at').first()
+
+            # Create subscription if payment is successful
+            if payment_status == "success":
+                start_date = timezone.now().date()
+                end_date = start_date + timedelta(days=plan.duration_days)
+                
+                UserSubscription.objects.create(
+                    user_id=user_id,
+                    plan_id=plan_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    remaining_inhouse=plan.inhouse_consults,
+                    remaining_expert=plan.expert_consults,
+                    is_active=True,
+                    created_at=timezone.now()
+                )
+                
+                # Send notifications
+                handle_payment_success(payment)
+
+            return Response({
+                "message": "Payment created successfully",
+                "data": {
+                    "payment_id": payment.id,
+                    "user_id": user_id,
+                    "plan_id": plan_id,
+                    "amount": amount,
+                    "status": payment_status
+                }
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            import traceback
+            print("PAYMENT ERROR:", traceback.format_exc())
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # --------- USAGE API ---------
@@ -203,55 +312,39 @@ class PaymentAnalyticsAPI(APIView):
         responses={200: openapi.Response('Payment analytics data')}
     )
     def get(self, request):
-        try:
-            month = request.query_params.get("month")
-            year = request.query_params.get("year")
-            date = request.query_params.get("date")
 
-            payments = SubscriptionPayment.objects.all()
+        month = request.query_params.get("month")
+        year = request.query_params.get("year")
+        date = request.query_params.get("date")
 
-            if date:
-                payments = payments.filter(created_at__date=date)
-            elif month and year:
-                payments = payments.filter(created_at__month=month, created_at__year=year)
-            elif year:
-                payments = payments.filter(created_at__year=year)
+        payments = SubscriptionPayment.objects.all()
 
-            total_payments = payments.count()
-            total_revenue = payments.filter(status="success").aggregate(total=Sum("amount"))["total"] or 0
+        if date:
+            payments = payments.filter(created_at__date=date)
+        elif month and year:
+            payments = payments.filter(created_at__month=month, created_at__year=year)
+        elif year:
+            payments = payments.filter(created_at__year=year)
 
-            # Revenue per plan with plan names
-            from django.db.models import Sum as _Sum
-            revenue_per_plan_qs = (
-                payments.filter(status="success")
-                .values("plan_id")
-                .annotate(revenue=_Sum("amount"))
-            )
-            revenue_per_plan = []
-            for r in revenue_per_plan_qs:
-                plan = SubscriptionPlan.objects.filter(id=r["plan_id"]).first()
-                revenue_per_plan.append({
-                    "plan_id": r["plan_id"],
-                    "plan_name": plan.name if plan else f"Plan {r['plan_id']}",
-                    "revenue": r["revenue"]
-                })
+        total_payments = payments.count()
+        total_revenue = payments.filter(status="success").aggregate(total=Sum("amount"))["total"] or 0
 
-            return Response({
-                "totalPayments": total_payments,
-                "totalRevenue": total_revenue,
-                "successPayments": payments.filter(status="success").count(),
-                "failedPayments": payments.filter(status="failed").count(),
-                "revenuePerPlan": revenue_per_plan,
-            })
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "totalPayments": 0,
-                "totalRevenue": 0,
-                "successPayments": 0,
-                "failedPayments": 0,
-                "revenuePerPlan": [],
-            }, status=500)
+        # Revenue per plan
+        from django.db.models import Sum as _Sum
+        revenue_per_plan_qs = (
+            payments.filter(status="success")
+            .values("plan_id")
+            .annotate(revenue=_Sum("amount"))
+        )
+        revenue_per_plan = [{"plan_id": r["plan_id"], "revenue": r["revenue"]} for r in revenue_per_plan_qs]
+
+        return Response({
+            "totalPayments": total_payments,
+            "totalRevenue": total_revenue,
+            "successPayments": payments.filter(status="success").count(),
+            "failedPayments": payments.filter(status="failed").count(),
+            "revenuePerPlan": revenue_per_plan,
+        })
 
 
 # --------- PLAN STATUS ---------

@@ -99,37 +99,37 @@ class AssignNutritionistAPI(APIView):
             with transaction.atomic():
                 # Prevent duplicate assignment
                 already = PatientAssignment.objects.filter(
-                    nutritionist_id=nutritionist_profile.id,
+                    nutritionist_id=nutritionist_id,
                     patient_id=user_id
                 ).exists()
                 if already:
                     return Response({"error": "Patient already assigned to this nutritionist"}, status=status.HTTP_400_BAD_REQUEST)
 
                 PatientAssignment.objects.create(
-                    nutritionist_id=nutritionist_profile.id,
+                    nutritionist_id=nutritionist_id,
                     patient_id=user_id
                 )
 
-                # Notifications
-                # 1. Notification for Patient
+                # Create notifications for admin, user, and nutritionist
+                # Admin notification
+                Notification.objects.create(
+                    user=None,
+                    type="admin",
+                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to patient {patient.full_name}."
+                )
+                
+                # User notification
                 Notification.objects.create(
                     user=patient,
                     type="user",
                     message=f"Nutritionist {nutritionist_user.full_name} has been assigned to you."
                 )
                 
-                # 2. Notification for Nutritionist
+                # Nutritionist notification
                 Notification.objects.create(
                     user=nutritionist_user,
                     type="nutritionist",
-                    message=f"You have been assigned to user {patient.full_name}."
-                )
-                
-                # 3. Notification for Admin (single notification for all admins)
-                Notification.objects.create(
-                    user=None,
-                    type="admin",
-                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to {patient.full_name}."
+                    message=f"You have been assigned to patient {patient.full_name}."
                 )
 
             return Response({
@@ -155,7 +155,7 @@ class NutritionistListAPIView(APIView):
         data = []
         for n in nutritionists:
             user = UserProfile.objects.filter(id=n.user_id).first()
-            patient_count = PatientAssignment.objects.filter(nutritionist_id=n.id).count()
+            patient_count = PatientAssignment.objects.filter(nutritionist_id=n.user_id).count()
             data.append({
                 "id": n.id,
                 "user_id": n.user_id,
@@ -480,11 +480,31 @@ class UserPlanNotificationAPI(APIView):
 
 
 class UserHealthProfileAPI(APIView):
+
+    @swagger_auto_schema(
+        operation_summary="Get User Health Profile",
+        operation_description="Fetch user health profile by user ID",
+        manual_parameters=[
+            openapi.Parameter(
+                'user_id',
+                openapi.IN_PATH,
+                description='User ID',
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        responses={
+            200: "User health profile fetched successfully",
+            404: "Health profile not found"
+        },
+        tags=["users"]
+    )
     def get(self, request, user_id):
         try:
             profile = UserHealthProfile.objects.filter(user_id=user_id).first()
             if not profile:
                 return Response({"error": "Health profile not found"}, status=404)
+
             return Response({
                 "user_id": profile.user_id,
                 "date_of_birth": profile.date_of_birth,
@@ -516,15 +536,33 @@ class UserHealthProfileAPI(APIView):
 
 
 class SubscribedUsersAPI(APIView):
-    """Returns only users who have an active/paid subscription"""
+
+    @swagger_auto_schema(
+        operation_summary="Get Subscribed Users",
+        operation_description="Fetch all users who have successful subscription payments",
+        responses={
+            200: UserSerializer(many=True)
+        },
+        tags=["users"]
+    )
     def get(self, request):
         try:
             paid_user_ids = set(
-                SubscriptionPayment.objects.filter(status="success").values_list('user_id', flat=True)
+                SubscriptionPayment.objects.filter(
+                    status="success"
+                ).values_list('user_id', flat=True)
             )
-            users = UserProfile.objects.filter(id__in=paid_user_ids).order_by("full_name")
+
+            users = UserProfile.objects.filter(
+                id__in=paid_user_ids
+            ).order_by("full_name")
+
             serializer = UserSerializer(users, many=True)
-            return Response({"results": serializer.data})
+
+            return Response({
+                "results": serializer.data
+            })
+
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
@@ -693,10 +731,12 @@ class UserListCreateView(APIView):
 #==========================================AVAILABLE NUTRITIONISTS FOR PATIENT===========================================#
 
 PLAN_NUTRITIONIST_MAP = {
-    'free':[ ],
-    'basic':   ['inhouse_expert'],
-    'silver':  ['expert'],
-    'premium': ['inhouse_expert', 'expert'],
+    'free': [],
+    'basic': ['inhouse', 'expert'],
+    'silver': ['inhouse', 'expert'],
+    'premium': ['inhouse', 'expert'],
+    'hero': ['inhouse', 'expert'],
+    'nutritionist full access': ['inhouse', 'expert'],
 }
 
 class AvailableNutritionistsView(APIView):
@@ -817,3 +857,195 @@ class AvailableNutritionistsView(APIView):
             "total": nutritionists.count(),
             "nutritionists": list(nutritionists)
         })
+
+
+
+#==========================================ELIGIBLE USERS FOR NUTRITIONIST ASSIGNMENT===========================================#
+
+class EligibleUsersForNutritionistAPI(APIView):
+    """
+    Get users eligible for nutritionist assignment based on:
+    1. User has a subscription (purchased a plan)
+    2. User is not already assigned to a nutritionist
+    3. Filter by nutritionist type (inhouse_expert or expert)
+    """
+
+    @swagger_auto_schema(
+        operation_summary="Get eligible users for nutritionist assignment",
+        operation_description="""
+        Returns users who:
+        - Have purchased a subscription plan
+        - Are not already assigned to a nutritionist
+        - Match the nutritionist type based on their plan
+        
+        Query Parameters:
+        - nutritionist_type: 'inhouse_expert' or 'expert' (optional, returns all if not specified)
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                name='nutritionist_type',
+                in_=openapi.IN_QUERY,
+                description="Filter by nutritionist type: 'inhouse_expert' or 'expert'",
+                type=openapi.TYPE_STRING,
+                required=False
+            )
+        ],
+        responses={
+            200: openapi.Response('List of eligible users'),
+            400: 'Invalid nutritionist type'
+        }
+    )
+    def get(self, request):
+        try:
+            nutritionist_type = request.query_params.get('nutritionist_type', '').lower().strip()
+            
+            # Get all users with subscriptions (active or not, just need to have purchased)
+            all_subscriptions = UserSubscription.objects.all().values_list('user_id', 'plan_id')
+            
+            user_ids_with_plans = [sub[0] for sub in all_subscriptions]
+            plan_ids = {sub[0]: sub[1] for sub in all_subscriptions}
+            
+            print(f"[DEBUG] Total users with subscriptions: {len(user_ids_with_plans)}")
+            
+            # Get all users with subscriptions
+            users_with_plans = UserProfile.objects.filter(
+                id__in=user_ids_with_plans,
+                role='user',
+                is_active=True
+            )
+            
+            print(f"[DEBUG] Active users with subscriptions: {users_with_plans.count()}")
+            
+            # Get already assigned users
+            assigned_users = PatientAssignment.objects.all().values_list('patient_id', flat=True)
+            
+            print(f"[DEBUG] Already assigned users: {len(assigned_users)}")
+            
+            # Filter out already assigned users
+            eligible_users = users_with_plans.exclude(id__in=assigned_users)
+            
+            print(f"[DEBUG] Eligible users (not assigned): {eligible_users.count()}")
+            
+            # Build response with plan information
+            result = []
+            for user in eligible_users:
+                plan_id = plan_ids.get(user.id)
+                plan = SubscriptionPlan.objects.filter(id=plan_id).first()
+                
+                if not plan:
+                    print(f"[DEBUG] Plan not found for user {user.id}, plan_id: {plan_id}")
+                    continue
+                
+                plan_name = plan.name.lower().strip()
+                allowed_types = list(PLAN_NUTRITIONIST_MAP.get(plan_name, []))
+                
+                # If plan not found in map, try to infer from inhouse_consults and expert_consults
+                if not allowed_types:
+                    if plan.inhouse_consults > 0:
+                        allowed_types.append('inhouse')
+                    if plan.expert_consults > 0:
+                        allowed_types.append('expert')
+                
+                print(f"[DEBUG] User {user.id} ({user.full_name}): plan_obj.name={plan.name}, plan_name={plan_name}, inhouse={plan.inhouse_consults}, expert={plan.expert_consults}, allowed_types={allowed_types}")
+                
+                # Filter by nutritionist type if specified
+                if nutritionist_type:
+                    if nutritionist_type not in allowed_types:
+                        print(f"[DEBUG] User {user.id} filtered out: {nutritionist_type} not in {allowed_types}")
+                        continue
+                    user_allowed_types = [nutritionist_type]
+                else:
+                    user_allowed_types = allowed_types
+                
+                subscription = UserSubscription.objects.filter(
+                    user_id=user.id,
+                    plan_id=plan_id
+                ).first()
+                
+                result.append({
+                    'id': user.id,
+                    'full_name': user.full_name,
+                    'email': user.email,
+                    'plan_name': plan_name,
+                    'plan_id': plan_id,
+                    'allowed_nutritionist_types': user_allowed_types,
+                    'subscription_end_date': subscription.end_date if subscription else None
+                })
+            
+            print(f"[DEBUG] Final result count: {len(result)}")
+            
+            return Response({
+                'total': len(result),
+                'nutritionist_type_filter': nutritionist_type or 'all',
+                'users': result
+            })
+            
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] {str(e)}")
+            print(traceback.format_exc())
+            return Response({
+                'error': str(e),
+                'total': 0,
+                'users': []
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+#==========================================DEBUG ENDPOINT FOR SUBSCRIPTIONS===========================================#
+
+class DebugSubscriptionsAPI(APIView):
+    """Debug endpoint to check subscriptions and assignments"""
+    
+    def get(self, request):
+        try:
+            from subscription.models import UserSubscription, SubscriptionPlan
+            
+            total_users = UserProfile.objects.filter(role='user').count()
+            total_subscriptions = UserSubscription.objects.count()
+            
+            # Try to get assignments - handle if table doesn't exist
+            try:
+                from nutritionist.models import PatientAssignment
+                total_assignments = PatientAssignment.objects.count()
+            except:
+                total_assignments = 0
+            
+            # Get sample subscriptions
+            sample_subs = UserSubscription.objects.all()[:5]
+            subs_data = []
+            for sub in sample_subs:
+                user = UserProfile.objects.filter(id=sub.user_id).first()
+                plan = SubscriptionPlan.objects.filter(id=sub.plan_id).first()
+                
+                # Check if assigned
+                try:
+                    from nutritionist.models import PatientAssignment
+                    assigned = PatientAssignment.objects.filter(patient_id=sub.user_id).exists()
+                except:
+                    assigned = False
+                
+                subs_data.append({
+                    'user_id': sub.user_id,
+                    'user_name': user.full_name if user else 'Unknown',
+                    'plan_id': sub.plan_id,
+                    'plan_name': plan.name if plan else 'Unknown',
+                    'plan_inhouse': plan.inhouse_consults if plan else 0,
+                    'plan_expert': plan.expert_consults if plan else 0,
+                    'is_active': sub.is_active,
+                    'end_date': str(sub.end_date),
+                    'already_assigned': assigned
+                })
+            
+            return Response({
+                'total_users': total_users,
+                'total_subscriptions': total_subscriptions,
+                'total_active_assignments': total_assignments,
+                'sample_subscriptions': subs_data
+            })
+        except Exception as e:
+            import traceback
+            return Response({
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }, status=400)
