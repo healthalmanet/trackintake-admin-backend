@@ -31,17 +31,17 @@ class UserWriteSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
-        """Override create to handle password properly"""
+        
         user = UserProfile.objects.create(
-            full_name=validated_data['full_name'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-            role=validated_data['role'],
-            is_active=validated_data.get('is_active', True)
-        )
+        full_name=validated_data['full_name'],
+        email=validated_data['email'],
+        password=validated_data['password'],
+        role=validated_data['role'],
+        is_active=validated_data.get('is_active', True),
+        is_admin=False  
+    )
         return user
     
-from rest_framework import serializers
 
 class AssignNutritionistSerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
