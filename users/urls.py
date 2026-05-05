@@ -1,4 +1,7 @@
+
+
 from django.urls import path
+from users.views import forgot_password, reset_password
 from users.views import (
     AssignNutritionistAPI,
     # AvailableNutritionistsView,
@@ -14,9 +17,11 @@ from users.views import (
     EligibleUsersForNutritionistAPI,
     DebugSubscriptionsAPI,
     AssignedNutritionistAPI,
+    AdminLoginAPI,
 )   
 
 urlpatterns = [
+    path('auth/login/', AdminLoginAPI.as_view(), name='admin-login'),
     path('create-user', UserListCreateView.as_view(), name='user-create'),
     path("<int:user_id>/", UserDetailView.as_view(), name='user-detail'),
     path("<int:user_id>/health-profile/", UserHealthProfileAPI.as_view(), name='user-health-profile'),
@@ -30,4 +35,8 @@ urlpatterns = [
     path('eligible-users-for-nutritionist/', EligibleUsersForNutritionistAPI.as_view(), name='eligible-users-for-nutritionist'),
     path('debug-subscriptions/', DebugSubscriptionsAPI.as_view(), name='debug-subscriptions'),
     path('assign-nutritionist/', AssignNutritionistAPI.as_view(), name='assign-nutritionist'),
+    path('forgot-password/', forgot_password, name='forgot-password'),
+    path('reset-password/<uidb64>/<token>/', reset_password, name='reset-password'),
 ]
+
+
