@@ -1049,3 +1049,60 @@ class DebugSubscriptionsAPI(APIView):
                 'error': str(e),
                 'traceback': traceback.format_exc()
             }, status=400)
+
+
+
+class AssignedNutritionistAPI(APIView):
+    """Get the assigned nutritionist for a patient"""
+    
+    @swagger_auto_schema(
+        operation_description="Get the assigned nutritionist for a patient",
+        manual_parameters=[
+            openapi.Parameter(
+                'user_id',
+                openapi.IN_PATH,
+                description='Patient User ID',
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        responses={
+            200: openapi.Response('Assigned nutritionist details'),
+            404: 'No assigned nutritionist found'
+        }
+    )
+    def get(self, request, user_id):
+        """Get the assigned nutritionist for a patient"""
+        try:
+            from nutritionist.models import PatientAssignment
+            
+            # Find the assignment for this patient
+            assignment = PatientAssignment.objects.filter(patient_id=user_id).first()
+            
+            if not assignment:
+                return Response(
+                    {"error": "No assigned nutritionist found"},
+                    status=404
+                )
+            
+            # Get the nutritionist details
+            nutritionist = UserProfile.objects.filter(id=assignment.nutritionist_id).first()
+            
+            if not nutritionist:
+                return Response(
+                    {"error": "Nutritionist not found"},
+                    status=404
+                )
+            
+            return Response({
+                "id": nutritionist.id,
+                "full_name": nutritionist.full_name,
+                "email": nutritionist.email,
+                "role": nutritionist.role
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=500
+            )
