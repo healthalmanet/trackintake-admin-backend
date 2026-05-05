@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
 from django.db.models import Q, Count
 from django.db.models.functions import Lower
 from drf_yasg.utils import swagger_auto_schema
@@ -20,9 +21,12 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 from django.db import transaction
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from .models import UserProfile
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.contrib.auth.tokens import default_token_generator
+import json
 
 
 
@@ -1049,3 +1053,219 @@ class DebugSubscriptionsAPI(APIView):
                 'error': str(e),
                 'traceback': traceback.format_exc()
             }, status=400)
+
+
+
+class AssignedNutritionistAPI(APIView):
+    """Get the assigned nutritionist for a patient"""
+    
+    @swagger_auto_schema(
+        operation_description="Get the assigned nutritionist for a patient",
+        manual_parameters=[
+            openapi.Parameter(
+                'user_id',
+                openapi.IN_PATH,
+                description='Patient User ID',
+                type=openapi.TYPE_INTEGER,
+                required=True
+            )
+        ],
+        responses={
+            200: openapi.Response('Assigned nutritionist details'),
+            404: 'No assigned nutritionist found'
+        }
+    )
+    def get(self, request, user_id):
+        """Get the assigned nutritionist for a patient"""
+        try:
+            from nutritionist.models import PatientAssignment
+            
+            # Find the assignment for this patient
+            assignment = PatientAssignment.objects.filter(patient_id=user_id).first()
+            
+            if not assignment:
+                return Response(
+                    {"error": "No assigned nutritionist found"},
+                    status=404
+                )
+            
+            # Get the nutritionist details
+            nutritionist = UserProfile.objects.filter(id=assignment.nutritionist_id).first()
+            
+            if not nutritionist:
+                return Response(
+                    {"error": "Nutritionist not found"},
+                    status=404
+                )
+            
+            return Response({
+                "id": nutritionist.id,
+                "full_name": nutritionist.full_name,
+                "email": nutritionist.email,
+                "role": nutritionist.role
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=500
+            )
+
+
+# ===================== PASSWORD RESET REQUEST ===================== #
+@csrf_exempt
+def forgot_password(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    email = data.get("email", "").strip()
+    if not email:
+        return JsonResponse({"error": "Email is required"}, status=400)
+
+    user = User.objects.filter(email__iexact=email).first()
+
+    if not user:
+        return JsonResponse({"message": "If this email exists, a reset link has been sent"})
+
+    uid   = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+
+    reset_link = f"http://127.0.0.1:8000/api/users/reset-password/{uid}/{token}/"
+
+    # Copy this from Django console and paste into Postman
+    print(f"\n✅ RESET LINK: {reset_link}\n")
+    print(f"   UID:   {uid}")
+    print(f"   TOKEN: {token}\n")
+
+    return JsonResponse({
+        "message": "Reset link sent",
+        # ⚠️ Remove this in production — only for local testing
+        "debug_uid":   uid,
+        "debug_token": token,
+        "debug_reset_link": reset_link
+    })
+
+
+# ===================== PASSWORD RESET ===================== #
+@csrf_exempt
+def reset_password(request, uidb64, token):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    password = data.get("password", "").strip()
+    if not password:
+        return JsonResponse({"error": "Password is required"}, status=400)
+
+    # Decode UID
+    try:
+        uid  = urlsafe_base64_decode(uidb64).decode()
+        user = User.objects.get(pk=uid)
+    except Exception:
+        return JsonResponse({"error": "Invalid user"}, status=400)
+
+    # Validate token
+    if not default_token_generator.check_token(user, token):
+        return JsonResponse({"error": "Invalid or expired token"}, status=400)
+
+    # Set new password
+    user.set_password(password)
+    user.save()
+
+    return JsonResponse({"message": "Password reset successful"})
+
+
+
+# ===================== ADMIN LOGIN ===================== #
+class AdminLoginAPI(APIView):
+    """Admin login endpoint"""
+    
+    @swagger_auto_schema(
+        operation_description="Admin login with email and password",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "email": openapi.Schema(type=openapi.TYPE_STRING, description="Admin email"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, description="Admin password")
+            },
+            required=["email", "password"]
+        ),
+        responses={
+            200: openapi.Response('Login successful'),
+            400: 'Invalid credentials',
+            401: 'Unauthorized - not an admin'
+        }
+    )
+    def post(self, request):
+        try:
+            email = request.data.get("email", "").strip()
+            password = request.data.get("password", "").strip()
+            
+            if not email or not password:
+                return Response(
+                    {"error": "Email and password are required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Find user by email
+            user_profile = UserProfile.objects.filter(email__iexact=email).first()
+            
+            if not user_profile:
+                return Response(
+                    {"error": "Invalid email or password"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if user is admin
+            if user_profile.role.lower() != "admin":
+                return Response(
+                    {"error": "Only admins can access this panel"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Get the Django User object and verify password
+            try:
+                django_user = User.objects.get(email__iexact=email)
+            except User.DoesNotExist:
+                return Response(
+                    {"error": "Invalid email or password"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check password
+            if not django_user.check_password(password):
+                return Response(
+                    {"error": "Invalid email or password"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Generate token
+            token, created = Token.objects.get_or_create(user=django_user)
+            
+            return Response({
+                "message": "Login successful",
+                "token": token.key,
+                "user": {
+                    "id": user_profile.id,
+                    "full_name": user_profile.full_name,
+                    "email": user_profile.email,
+                    "role": user_profile.role
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            print("LOGIN ERROR:", traceback.format_exc())
+            return Response(
+                {"error": str(e), "message": "An error occurred during login"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

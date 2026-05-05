@@ -179,12 +179,48 @@ class UserGrowthAPI(APIView):
 
     @swagger_auto_schema(
         operation_description="Get user growth data over time",
+        manual_parameters=[
+            openapi.Parameter(
+                'date',
+                openapi.IN_QUERY,
+                description="Specific date (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                required=False
+            ),
+            openapi.Parameter(
+                'month',
+                openapi.IN_QUERY,
+                description="Month number (1-12)",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+            openapi.Parameter(
+                'year',
+                openapi.IN_QUERY,
+                description="Year (YYYY)",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+        ],
         responses={200: openapi.Response('User growth statistics')}
     )
     def get(self, request):
 
+        date = request.GET.get("date")
+        month = request.GET.get("month")
+        year = request.GET.get("year")
+
+        users = UserProfile.objects.all()
+
+        if date:
+            users = users.filter(date_joined__date=date)
+        elif month and year:
+            users = users.filter(date_joined__month=int(month), date_joined__year=int(year))
+        elif year:
+            users = users.filter(date_joined__year=int(year))
+
         user_growth = list(
-            UserProfile.objects
+            users
             .annotate(date=TruncDate("date_joined"))
             .values("date")
             .annotate(users=Count("id"))
@@ -202,13 +238,48 @@ class PlanDistributionAPI(APIView):
 
     @swagger_auto_schema(
         operation_description="Get distribution of subscription plans among users",
+        manual_parameters=[
+            openapi.Parameter(
+                'date',
+                openapi.IN_QUERY,
+                description="Specific date (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                required=False
+            ),
+            openapi.Parameter(
+                'month',
+                openapi.IN_QUERY,
+                description="Month number (1-12)",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+            openapi.Parameter(
+                'year',
+                openapi.IN_QUERY,
+                description="Year (YYYY)",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+        ],
         responses={200: openapi.Response('Plan distribution data')}
     )
     def get(self, request):
 
+        date = request.GET.get("date")
+        month = request.GET.get("month")
+        year = request.GET.get("year")
+
+        payments = SubscriptionPayment.objects.filter(status="success")
+
+        if date:
+            payments = payments.filter(created_at__date=date)
+        elif month and year:
+            payments = payments.filter(created_at__month=int(month), created_at__year=int(year))
+        elif year:
+            payments = payments.filter(created_at__year=int(year))
+
         plans = list(
-            SubscriptionPayment.objects
-            .filter(status="success")
+            payments
             .values("plan_id")
             .annotate(users=Count("user_id"))
             .order_by("-users")
@@ -259,13 +330,48 @@ class RevenueByPlanAPI(APIView):
 
     @swagger_auto_schema(
         operation_description="Get revenue breakdown by subscription plan",
+        manual_parameters=[
+            openapi.Parameter(
+                'date',
+                openapi.IN_QUERY,
+                description="Specific date (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                required=False
+            ),
+            openapi.Parameter(
+                'month',
+                openapi.IN_QUERY,
+                description="Month number (1-12)",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+            openapi.Parameter(
+                'year',
+                openapi.IN_QUERY,
+                description="Year (YYYY)",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+        ],
         responses={200: openapi.Response('Revenue by plan data')}
     )
     def get(self, request):
 
+        date = request.GET.get("date")
+        month = request.GET.get("month")
+        year = request.GET.get("year")
+
+        payments = SubscriptionPayment.objects.filter(status="success")
+
+        if date:
+            payments = payments.filter(created_at__date=date)
+        elif month and year:
+            payments = payments.filter(created_at__month=int(month), created_at__year=int(year))
+        elif year:
+            payments = payments.filter(created_at__year=int(year))
+
         revenue = list(
-            SubscriptionPayment.objects
-            .filter(status="success")
+            payments
             .values("plan_id")
             .annotate(total_revenue=Sum("amount"))
             .order_by("-total_revenue")

@@ -4,9 +4,11 @@ from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+from django.db.models import Q
 
 from .models import Meal , DietRecommendation
 from .serializers import MealSerializer , DietRecommendationSerializer
+from users.models import UserProfile
 
 
 class StandardPagination(PageNumberPagination):
@@ -133,20 +135,71 @@ class DietRecommendationAPIView(APIView):
     pagination_class = StandardPagination
 
     @swagger_auto_schema(
-        operation_description="Get all diet recommendations with pagination",
+        operation_description="Get all diet recommendations with pagination and search",
         manual_parameters=[
-            openapi.Parameter('page', openapi.IN_QUERY, description='Page number', type=openapi.TYPE_INTEGER),
-            openapi.Parameter('page_size', openapi.IN_QUERY, description='Items per page', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('search',
+                openapi.IN_QUERY,
+                description='Search by user name or nutritionist name',
+                type=openapi.TYPE_STRING),
+            openapi.Parameter('nutritionist_id',
+                openapi.IN_QUERY,
+                description='Filter by nutritionist ID',
+                type=openapi.TYPE_INTEGER),
+            openapi.Parameter('status',
+                openapi.IN_QUERY,
+                description='Filter by status (approved, pending, failed, rejected, etc.)',
+                type=openapi.TYPE_STRING),
+            openapi.Parameter('page',
+                openapi.IN_QUERY,
+                description='Page number',
+                type=openapi.TYPE_INTEGER),
+            openapi.Parameter('page_size',
+                openapi.IN_QUERY,
+                description='Items per page',
+                type=openapi.TYPE_INTEGER),
         ],
-        responses={200: openapi.Response('List of diet recommendations', DietRecommendationSerializer(many=True))}
     )
     def get(self, request):
+        from nutritionist.models import PatientAssignment
+        
+        search = request.GET.get("search")
+        nutritionist_id = request.GET.get("nutritionist_id")
+        status_filter = request.GET.get("status")
+        
         data = DietRecommendation.objects.filter(is_deleted=False).order_by('-created_at')
+        
+        # Filter by search term (user name or nutritionist name)
+        if search:
+            matched_ids = UserProfile.objects.filter(full_name__icontains=search).values_list("id", flat=True)
+            data = data.filter(Q(user_id__in=matched_ids) |
+                Q(reviewed_by_id__in=matched_ids))
+        
+        # Filter by status
+        if status_filter:
+            data = data.filter(status__iexact=status_filter)
+        
+        # Filter by assigned nutritionist
+        if nutritionist_id:
+            try:
+                # Convert nutritionist_id to int
+                nut_id = int(nutritionist_id)
+                
+                # Get all patients assigned to this nutritionist
+                assigned_patients = PatientAssignment.objects.filter(
+                    nutritionist_id=nut_id
+                ).values_list('patient_id', flat=True)
+                
+                # Filter diet plans for these patients
+                data = data.filter(user_id__in=assigned_patients)
+                print(f"Filtered by nutritionist {nut_id}: found {data.count()} plans")
+            except (ValueError, TypeError) as e:
+                print(f"Error filtering by nutritionist: {e}")
         
         paginator = self.pagination_class()
         paginated_data = paginator.paginate_queryset(data, request)
         
-        serializer = DietRecommendationSerializer(paginated_data, many=True)
+        serializer = DietRecommendationSerializer(paginated_data,
+            many=True)
         return paginator.get_paginated_response(serializer.data)
 
     @swagger_auto_schema(
@@ -158,15 +211,12 @@ class DietRecommendationAPIView(APIView):
         }
     )
     def post(self, request):
-        print(f"Creating diet plan with data: {request.data}")
         serializer = DietRecommendationSerializer(data=request.data)
 
         if serializer.is_valid():
-            instance = serializer.save()
-            print(f"Diet plan created successfully with ID: {instance.id}")
+            serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        print(f"Serializer errors: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
