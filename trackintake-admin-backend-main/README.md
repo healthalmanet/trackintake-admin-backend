@@ -1,1 +1,0 @@
-# trackintake-admin-backend
