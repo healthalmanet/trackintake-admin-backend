@@ -168,11 +168,21 @@ class DietRecommendationAPIView(APIView):
         
         data = DietRecommendation.objects.filter(is_deleted=False).order_by('-created_at')
         
-        # Filter by search term (user name or nutritionist name)
+        # Filter by search term (user name or assigned nutritionist name)
         if search:
-            matched_ids = UserProfile.objects.filter(full_name__icontains=search).values_list("id", flat=True)
-            data = data.filter(Q(user_id__in=matched_ids) |
-                Q(reviewed_by_id__in=matched_ids))
+            # Search by user name
+            matched_user_ids = UserProfile.objects.filter(full_name__icontains=search).values_list("id", flat=True)
+            
+            # Search by assigned nutritionist name
+            matched_nutritionist_ids = UserProfile.objects.filter(full_name__icontains=search).values_list("id", flat=True)
+            assigned_patient_ids = PatientAssignment.objects.filter(
+                nutritionist_id__in=matched_nutritionist_ids
+            ).values_list('patient_id', flat=True)
+            
+            # Filter: show plans where EITHER user name matches OR assigned nutritionist name matches
+            # This ensures we only show plans with the searched nutritionist
+            data = data.filter(Q(user_id__in=matched_user_ids) |
+                Q(user_id__in=assigned_patient_ids))
         
         # Filter by status
         if status_filter:
