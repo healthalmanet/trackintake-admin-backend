@@ -241,6 +241,8 @@ class SubscriptionUsageAPI(APIView):
     )
     def get(self, request):
         try:
+            from .serializers import PaymentDetailSerializer
+            
             payments = SubscriptionPayment.objects.all().order_by("-created_at")
 
             date = request.query_params.get("date")
@@ -262,46 +264,46 @@ class SubscriptionUsageAPI(APIView):
             page = int(request.query_params.get("page", 1))
             page_size = int(request.query_params.get("page_size", 10))
 
-            all_data = []
-            for payment in payments:
-                user = UserProfile.objects.filter(id=payment.user_id).first()
-                user_name = user.full_name if user else f"User #{payment.user_id}"
-                email = user.email if user else ""
+            # Filter by search term if provided
+            if search:
+                search_lower = search.lower()
+                # Get user IDs matching search
+                matching_users = UserProfile.objects.filter(
+                    full_name__icontains=search
+                ) | UserProfile.objects.filter(
+                    email__icontains=search
+                )
+                user_ids = matching_users.values_list('id', flat=True)
+                payments = payments.filter(user_id__in=user_ids)
 
-                if search:
-                    q = search.lower()
-                    if q not in user_name.lower() and q not in email.lower():
-                        continue
-
-                plan = SubscriptionPlan.objects.filter(id=payment.plan_id).first()
-                sub = UserSubscription.objects.filter(
-                    user_id=payment.user_id,
-                    plan_id=payment.plan_id
-                ).first()
-
-                all_data.append({
-                    "user_name": user_name,
-                    "email": email,
-                    "plan_name": plan.name if plan else f"Plan #{payment.plan_id}",
-                    "payment_id": payment.id,
-                    "payment_status": payment.status,
-                    "start_date": sub.start_date if sub else None,
-                    "end_date": sub.end_date if sub else None,
-                })
-
-            total = len(all_data)
+            # Get total count before pagination
+            total = payments.count()
+            
+            # Apply pagination
             start = (page - 1) * page_size
-            paginated = all_data[start:start + page_size]
+            paginated_payments = payments[start:start + page_size]
+
+            # Serialize the paginated payments
+            serializer = PaymentDetailSerializer(paginated_payments, many=True)
 
             return Response({
-                "results": paginated,
+                "results": serializer.data,
                 "total": total,
                 "page": page,
                 "page_size": page_size,
                 "total_pages": max(1, (total + page_size - 1) // page_size),
             })
         except Exception as e:
-            return Response({"error": str(e), "results": [], "total": 0, "page": 1, "page_size": 10, "total_pages": 1}, status=500)
+            import traceback
+            print("USAGE API ERROR:", traceback.format_exc())
+            return Response({
+                "error": str(e), 
+                "results": [], 
+                "total": 0, 
+                "page": 1, 
+                "page_size": 10, 
+                "total_pages": 1
+            }, status=500)
 
 
 # --------- PAYMENT ANALYTICS ---------

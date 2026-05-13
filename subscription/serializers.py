@@ -1,6 +1,7 @@
 from rest_framework import serializers
-from .models import SubscriptionPlan
+from .models import SubscriptionPlan, SubscriptionPayment, UserSubscription
 from django.db import connection
+from users.models import UserProfile
 
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
@@ -9,6 +10,52 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
         model = SubscriptionPlan
         fields = "__all__"
         read_only_fields = ["id"]
+
+
+class PaymentDetailSerializer(serializers.Serializer):
+    """Serializer for payment details with user and plan information"""
+    user_name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    plan_name = serializers.SerializerMethodField()
+    payment_id = serializers.IntegerField(source='id')
+    payment_status = serializers.CharField(source='status')
+    start_date = serializers.SerializerMethodField()
+    end_date = serializers.SerializerMethodField()
+    
+    def get_user_name(self, obj):
+        try:
+            user = UserProfile.objects.get(id=obj.user_id)
+            return user.full_name or f"User #{obj.user_id}"
+        except UserProfile.DoesNotExist:
+            return f"User #{obj.user_id}"
+    
+    def get_email(self, obj):
+        try:
+            user = UserProfile.objects.get(id=obj.user_id)
+            return user.email or ""
+        except UserProfile.DoesNotExist:
+            return ""
+    
+    def get_plan_name(self, obj):
+        try:
+            plan = SubscriptionPlan.objects.get(id=obj.plan_id)
+            return plan.name
+        except SubscriptionPlan.DoesNotExist:
+            return f"Plan #{obj.plan_id}"
+    
+    def get_start_date(self, obj):
+        try:
+            sub = UserSubscription.objects.get(user_id=obj.user_id, plan_id=obj.plan_id)
+            return sub.start_date
+        except UserSubscription.DoesNotExist:
+            return None
+    
+    def get_end_date(self, obj):
+        try:
+            sub = UserSubscription.objects.get(user_id=obj.user_id, plan_id=obj.plan_id)
+            return sub.end_date
+        except UserSubscription.DoesNotExist:
+            return None
     
     def create(self, validated_data):
         """Custom create method to handle raw SQL insert for managed=False model"""

@@ -107,8 +107,14 @@ DATABASES = {
 # Add connection options after config
 DATABASES['default']['OPTIONS'] = {
     'connect_timeout': 10,
-    'options': '-c statement_timeout=30000'
+    'options': '-c statement_timeout=30000',
+    'sslmode': 'require' if not DEBUG else 'disable',
 }
+
+# Connection pooling for production
+if not DEBUG:
+    DATABASES['default']['CONN_MAX_AGE'] = 600
+    DATABASES['default']['OPTIONS']['connect_timeout'] = 15
 
 
 # CORS Configuration - Dynamic via environment variables

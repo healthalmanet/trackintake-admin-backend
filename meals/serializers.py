@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Meal, DietRecommendation
 from django.utils import timezone
+from users.models import UserProfile
 
 
 class MealSerializer(serializers.ModelSerializer):
@@ -11,9 +12,19 @@ class MealSerializer(serializers.ModelSerializer):
 
 
 class DietRecommendationSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    
     class Meta:
         model = DietRecommendation
         fields = '__all__'
+    
+    def get_user_name(self, obj):
+        """Get the user's full name from user_id"""
+        try:
+            user = UserProfile.objects.get(id=obj.user_id)
+            return user.full_name or f"User #{obj.user_id}"
+        except UserProfile.DoesNotExist:
+            return f"User #{obj.user_id}"
     
     def create(self, validated_data):
         """Override create to set timestamps if not provided"""

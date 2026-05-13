@@ -72,6 +72,8 @@ class SubscriptionPayment(models.Model):
     amount = models.IntegerField()
 
     status = models.CharField(max_length=20)   # success / failed
+    
+    razorpay_order_id = models.CharField(max_length=100, null=True, blank=True)
 
     created_at = models.DateTimeField()
 
