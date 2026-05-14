@@ -1,8 +1,12 @@
 from django.contrib import admin
+from django.utils.html import format_html
+from django.urls import path
+from django.shortcuts import get_object_or_404, render
+from django.http import HttpResponseRedirect
+from django.contrib.auth.hashers import make_password
+from .models import UserProfile, UserHealthProfile
+import logging
 
-<<<<<<< Updated upstream
-# Register your models here.
-=======
 logger = logging.getLogger(__name__)
 
 
@@ -100,4 +104,3 @@ class UserHealthProfileAdmin(admin.ModelAdmin):
     list_display  = ('user_id', 'gender', 'country', 'city', 'height_cm', 'weight_kg', 'goal')
     search_fields = ('user_id',)
     list_filter   = ('gender', 'goal', 'diet_type', 'is_diabetic', 'is_hypertensive')
->>>>>>> Stashed changes
