@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import DietRecommendationAPIView, DietRecommendationDetailAPI, MealListCreateAPI, MealDetailAPI , DietRecommendationSerializer
+from .views import DietRecommendationAPIView, DietRecommendationDetailAPI, MealListCreateAPI, MealDetailAPI, DietStatsAPIView
 
 
 urlpatterns = [
@@ -12,5 +12,8 @@ urlpatterns = [
         name='diet-recommendations'),
     path("diet-recommendations/<int:pk>/",
         DietRecommendationDetailAPI.as_view(),
-        name='diet-recommendations-detail')
+        name='diet-recommendations-detail'),
+    path("diet-recommendations/stats/",
+        DietStatsAPIView.as_view(),
+        name='diet-recommendations-stats'),
 ]

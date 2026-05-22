@@ -1,7 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.authtoken.models import Token
 from django.db.models import Q, Count
 from django.db.models.functions import Lower
 from drf_yasg.utils import swagger_auto_schema
@@ -21,12 +20,9 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 from django.db import transaction
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.contrib.auth.tokens import default_token_generator
-import json
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import UserProfile
 
 
 
@@ -40,6 +36,8 @@ def check_db_connection():
         return True
     except OperationalError:
         return False
+
+
 
 
 
@@ -146,26 +144,57 @@ class AssignNutritionistAPI(APIView):
             
 #=====================================================================================NUTRITIONIST LIST WITH PATIENT COUNT======================================================================#            
 class NutritionistListAPIView(APIView):
+
     @swagger_auto_schema(
-          operation_summary="Nutritionist List",
+        operation_summary="Nutritionist List",
         operation_description="Get all nutritionists with patient count",
         responses={200: "Success"}
     )
     def get(self, request):
+
         nutritionists = NutritionistProfile.objects.all()
 
         data = []
+
         for n in nutritionists:
-            user = UserProfile.objects.filter(id=n.user_id).first()
-            patient_count = PatientAssignment.objects.filter(nutritionist_id=n.user_id).count()
+
+            user = UserProfile.objects.filter(
+                id=n.user_id
+            ).first()
+
+            patient_count = PatientAssignment.objects.filter(
+                nutritionist_id=n.user_id
+            ).count()
+
             data.append({
+
                 "id": n.id,
+
                 "user_id": n.user_id,
+
                 "user_name": user.full_name if user else f"User #{n.user_id}",
+
                 "email": user.email if user else None,
+
                 "nutritionist_type": n.nutritionist_type,
+
                 "is_virtual_enabled": n.is_virtual_enabled,
+
                 "is_verified": n.is_verified,
+
+                # NEW FIELDS
+
+                "experience_years": n.experience_years,
+
+                "degree": n.degree,
+
+                "license_number": n.license_number,
+
+                "certificate": (
+                    n.certificate.url
+                    if n.certificate else None
+                ),
+
                 "patient_count": patient_count
             })
 
@@ -173,6 +202,8 @@ class NutritionistListAPIView(APIView):
             "success": True,
             "data": data
         })
+
+        
 
 #=====================================================================================USERS WITH PAYMENT BUT NO PROFILE======================================================================#
 class UsersWithPaymentNoProfileAPI(APIView):
@@ -1053,257 +1084,109 @@ class DebugSubscriptionsAPI(APIView):
             }, status=400)
 
 
-
-class AssignedNutritionistAPI(APIView):
-    """Get the assigned nutritionist for a patient"""
-    
-    @swagger_auto_schema(
-        operation_description="Get the assigned nutritionist for a patient",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='Patient User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: openapi.Response('Assigned nutritionist details'),
-            404: 'No assigned nutritionist found'
-        }
-    )
-    def get(self, request, user_id):
-        """Get the assigned nutritionist for a patient"""
-        try:
-            from nutritionist.models import PatientAssignment
-            
-            # Find the assignment for this patient
-            assignment = PatientAssignment.objects.filter(patient_id=user_id).first()
-            
-            if not assignment:
-                return Response(
-                    {"error": "No assigned nutritionist found"},
-                    status=404
-                )
-            
-            # Get the nutritionist details
-            nutritionist = UserProfile.objects.filter(id=assignment.nutritionist_id).first()
-            
-            if not nutritionist:
-                return Response(
-                    {"error": "Nutritionist not found"},
-                    status=404
-                )
-            
-            return Response({
-                "id": nutritionist.id,
-                "full_name": nutritionist.full_name,
-                "email": nutritionist.email,
-                "role": nutritionist.role
-            })
-            
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=500
-            )
-
-
-# ===================== PASSWORD RESET REQUEST ===================== #
-
-class ForgotPasswordAPI(APIView):
-    @swagger_auto_schema(
-        operation_summary="Forgot Password",
-        operation_description="Email bhejo — auto-generated new password email pe aayega",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['email'],
-            properties={
-                'email': openapi.Schema(type=openapi.TYPE_STRING, description='User email address'),
-            }
-        ),
-        responses={
-            200: 'New password sent to email',
-            404: 'User not found',
-            500: 'Email sending failed',
-        },
-        tags=["auth"]
-    )
-    def post(self, request):
-        try:
-            import secrets, string
-            from django.core.mail import send_mail
-            from django.conf import settings
-
-            email = request.data.get('email', '').strip()
-
-            if not email:
-                return Response({"error": "email is required"}, status=400)
-
-            user = UserProfile.objects.filter(email__iexact=email).first()
-            if not user:
-                return Response({"error": "No user found with this email"}, status=404)
-
-            # Generate random 10-char password
-            chars = string.ascii_letters + string.digits + "!@#$"
-            new_password = ''.join(secrets.choice(chars) for _ in range(10))
-
-            # Save to DB
-            user.password = new_password
-            user.save()
-
-            # Send email
-            try:
-                send_mail(
-                    subject='🔐 Your TrackIntake Password Has Been Reset',
-                    message=(
-                        f'Hello {user.full_name},\n\n'
-                        f'Your password has been reset.\n\n'
-                        f'New Password: {new_password}\n\n'
-                        f'Please login and change your password immediately.\n\n'
-                        f'— TrackIntake Team'
-                    ),
-                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@trackintake.com'),
-                    recipient_list=[email],
-                    fail_silently=False,
-                )
-                return Response({
-                    "success": True,
-                    "message": f"New password sent to {email} successfully"
-                }, status=200)
-
-            except Exception as mail_error:
-                # Email fail hone par bhi password reset hua — debug ke liye print
-                print(f"EMAIL ERROR: {mail_error}")
-                return Response({
-                    "success": False,
-                    "error": str(mail_error),
-                    "message": "Password was reset but email could not be sent. Check EMAIL settings."
-                }, status=500)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-# ===================== RESET PASSWORD API ===================== #
+# ==========================================================================RESET PASSWORD API====================================================================#
 
 class ResetPasswordAPI(APIView):
+    """Reset user password with validation"""
+    
     @swagger_auto_schema(
-        operation_summary="Reset Password",
-        operation_description="Admin kisi bhi user ka password change kar sakta hai user_id se",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['user_id', 'new_password', 'confirm_password'],
-            properties={
-                'user_id':          openapi.Schema(type=openapi.TYPE_INTEGER, description='User ID'),
-                'new_password':     openapi.Schema(type=openapi.TYPE_STRING,  description='New password (min 6 chars)'),
-                'confirm_password': openapi.Schema(type=openapi.TYPE_STRING,  description='Confirm new password'),
-            }
-        ),
-        responses={
-            200: 'Password reset successfully',
-            400: 'Validation error',
-            404: 'User not found',
-        },
-        tags=["auth"]
-    )
-    def post(self, request):
-        try:
-            user_id          = request.data.get('user_id')
-            new_password     = request.data.get('new_password', '').strip()
-            confirm_password = request.data.get('confirm_password', '').strip()
-
-            # Validations
-            if not user_id:
-                return Response({"error": "user_id is required"}, status=400)
-            if not new_password:
-                return Response({"error": "new_password is required"}, status=400)
-            if new_password != confirm_password:
-                return Response({"error": "Passwords do not match"}, status=400)
-            if len(new_password) < 6:
-                return Response({"error": "Password must be at least 6 characters"}, status=400)
-
-            user = UserProfile.objects.filter(id=user_id).first()
-            if not user:
-                return Response({"error": "User not found"}, status=404)
-
-            # Save plain-text password (aapka existing system plain-text use karta hai)
-            user.password = new_password
-            user.save()
-
-            return Response({
-                "success": True,
-                "message": f"Password for '{user.full_name}' has been reset successfully"
-            }, status=200)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-# ===================== ADMIN LOGIN ===================== #
-class AdminLoginAPI(APIView):
-    """Admin login endpoint"""
-
-    @swagger_auto_schema(
-        operation_description="Admin login with email and password",
+        operation_summary="Reset User Password",
+        operation_description="Admin can reset password for any user with validation",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                "email": openapi.Schema(type=openapi.TYPE_STRING, description="Admin email"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, description="Admin password")
+                "user_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="User ID"),
+                "new_password": openapi.Schema(type=openapi.TYPE_STRING, description="New password (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char)"),
+                "confirm_password": openapi.Schema(type=openapi.TYPE_STRING, description="Confirm password"),
             },
-            required=["email", "password"]
+            required=["user_id", "new_password", "confirm_password"]
         ),
         responses={
-            200: openapi.Response('Login successful'),
-            400: 'Invalid credentials',
-            401: 'Unauthorized - not an admin'
+            200: "Password reset successfully",
+            400: "Validation error",
+            404: "User not found",
+            500: "Error resetting password"
         }
     )
     def post(self, request):
         try:
-            email    = request.data.get("email", "").strip()
-            password = request.data.get("password", "").strip()
-
-            if not email or not password:
-                return Response(
-                    {"error": "Email and password are required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            user_profile = UserProfile.objects.filter(email__iexact=email).first()
-
-            if not user_profile:
-                return Response(
-                    {"error": "Invalid email or password"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if user_profile.role.lower() != "admin":
-                return Response(
-                    {"error": "Only admins can access this panel"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-
-            if user_profile.password != password:
-                return Response(
-                    {"error": "Invalid email or password"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            return Response({
-                "message": "Login successful",
-                "user": {
-                    "id":        user_profile.id,
-                    "full_name": user_profile.full_name,
-                    "email":     user_profile.email,
-                    "role":      user_profile.role
-                }
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            user_id = request.data.get("user_id")
+            new_password = request.data.get("new_password")
+            confirm_password = request.data.get("confirm_password")
+            
+            # Validation
+            if not user_id or not new_password or not confirm_password:
+                return Response({
+                    "error": "user_id, new_password, and confirm_password are required"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if user exists
+            try:
+                user_profile = UserProfile.objects.get(id=user_id)
+            except UserProfile.DoesNotExist:
+                return Response({
+                    "error": f"User with ID {user_id} not found"
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Check if passwords match
+            if new_password != confirm_password:
+                return Response({
+                    "error": "Passwords do not match"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Validate password strength
+            import re
+            if len(new_password) < 8:
+                return Response({
+                    "error": "Password must be at least 8 characters long"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not re.search(r'[A-Z]', new_password):
+                return Response({
+                    "error": "Password must contain at least one uppercase letter"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not re.search(r'[a-z]', new_password):
+                return Response({
+                    "error": "Password must contain at least one lowercase letter"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not re.search(r'\d', new_password):
+                return Response({
+                    "error": "Password must contain at least one number"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/\\|`~]', new_password):
+                return Response({
+                    "error": "Password must contain at least one special character (!@#$%^&*)"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get the Django User object and reset password
+            django_user = User.objects.get(userprofile=user_profile)
+            django_user.set_password(new_password)
+            django_user.save()
+            
+            # Create audit log notification
+            admin_user = request.user if request.user.is_authenticated else None
+            admin_name = admin_user.userprofile.full_name if admin_user and hasattr(admin_user, 'userprofile') else "System Admin"
+            
+            Notification.objects.create(
+                user=None,
+                type="admin",
+                message=f"🔑 Password reset for {user_profile.full_name} (ID: #{user_id}) by {admin_name}"
             )
+            
+            return Response({
+                "message": "Password reset successfully",
+                "user_id": user_id,
+                "user_name": user_profile.full_name,
+                "email": user_profile.email
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            print("RESET PASSWORD ERROR:", traceback.format_exc())
+            return Response({
+                "error": str(e),
+                "message": "Error resetting password"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

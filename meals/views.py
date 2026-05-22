@@ -296,3 +296,58 @@ class DietRecommendationDetailAPI(APIView):
         
         diet.delete()
         return Response({"message": "Diet recommendation deleted successfully"})
+
+
+# ==========================================================================DIET STATS API====================================================================#
+
+class DietStatsAPIView(APIView):
+    """Get diet recommendation statistics with single database query"""
+    
+    @swagger_auto_schema(
+        operation_summary="Get Diet Plans Statistics",
+        operation_description="Get count of diet plans by status (total, approved, pending, failed, rejected)",
+        responses={
+            200: openapi.Response('Diet stats', examples={
+                "application/json": {
+                    "total": 100,
+                    "approved": 45,
+                    "pending": 30,
+                    "failed": 15,
+                    "rejected": 10
+                }
+            })
+        }
+    )
+    def get(self, request):
+        try:
+            from django.db.models import Count, Q
+            
+            # Single database query to get all stats
+            stats = DietRecommendation.objects.filter(
+                is_deleted=False
+            ).aggregate(
+                total=Count('id'),
+                approved=Count('id', filter=Q(status__iexact='approved')),
+                pending=Count('id', filter=Q(status__iexact='pending')),
+                failed=Count('id', filter=Q(status__iexact='failed')),
+                rejected=Count('id', filter=Q(status__iexact='rejected')),
+            )
+            
+            return Response({
+                "success": True,
+                "data": {
+                    "total": stats['total'],
+                    "approved": stats['approved'],
+                    "pending": stats['pending'],
+                    "failed": stats['failed'],
+                    "rejected": stats['rejected'],
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            print("DIET STATS ERROR:", traceback.format_exc())
+            return Response({
+                "error": str(e),
+                "message": "Error fetching diet stats"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

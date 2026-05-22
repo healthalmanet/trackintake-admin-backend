@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 class UserProfileAdmin(admin.ModelAdmin):
 
     list_display = (
-        'full_name', 'email', 'role', 'plan',
+        'pk',   
+        'user_id_with_name', 'email', 'role', 'plan',
         'is_active', 'is_admin', 'date_joined',
         'reset_password_button',
     )
@@ -22,6 +23,21 @@ class UserProfileAdmin(admin.ModelAdmin):
     search_fields = ('full_name', 'email')
     ordering      = ('-date_joined',)
     readonly_fields = ('date_joined',)
+
+    # ✅ Duplicate name check — ID sirf tab dikhayega jab same naam ho
+    def user_id_with_name(self, obj):
+        duplicate_exists = UserProfile.objects.filter(
+            full_name=obj.full_name
+        ).exclude(pk=obj.pk).exists()
+
+        if duplicate_exists:
+            return format_html(
+                '<span>{} <span style="color:#888;font-size:11px;">(#{})</span></span>',
+                obj.full_name, obj.pk
+            )
+        return obj.full_name
+
+    user_id_with_name.short_description = 'Full Name'
 
     def get_urls(self):
         urls = super().get_urls()
@@ -88,3 +104,4 @@ class UserHealthProfileAdmin(admin.ModelAdmin):
     list_display  = ('user_id', 'gender', 'country', 'city', 'height_cm', 'weight_kg', 'goal')
     search_fields = ('user_id',)
     list_filter   = ('gender', 'goal', 'diet_type', 'is_diabetic', 'is_hypertensive')
+
