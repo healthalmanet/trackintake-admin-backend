@@ -1,1269 +1,26 @@
-from django.contrib.auth import get_user_model
+import json
+from datetime import datetime, timezone
+from django.db import connection
+from django.contrib.auth.hashers import check_password, make_password
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.authtoken.models import Token
-from django.db.models import Q, Count
-from django.db.models.functions import Lower
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-from subscription.models import SubscriptionPayment, UserSubscription, SubscriptionPlan
-from users.models import UserProfile, UserHealthProfile
-from notifications.models import Notification
-from .serializers import AssignNutritionistSerializer, UserSerializer, UserWriteSerializer
-from django.core.paginator import Paginator, EmptyPage
-from django.db import connection
-from django.db.utils import OperationalError
-from nutritionist.models import NutritionistProfile, PatientAssignment
-from django.utils.timezone import now
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
 from rest_framework import status
-from django.utils import timezone
-from datetime import timedelta
-from django.db import transaction
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.contrib.auth.tokens import default_token_generator
-import json
 
 
-
-
-User = get_user_model()
 def check_db_connection():
-    """Check if database is connected"""
     try:
         connection.ensure_connection()
-        print("Database connection successful")
         return True
-    except OperationalError:
+    except Exception:
         return False
-
-
-
-# ====================================================================ASSIGNED NUTRITIONIST======================================================================#                 
-class AssignNutritionistAPI(APIView):
-    @swagger_auto_schema(
-    operation_description="Assign a nutritionist to a user",
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        properties={
-            "user_id": openapi.Schema(
-                type=openapi.TYPE_INTEGER,
-                description="ID of the user"
-            ),
-            "nutritionist_id": openapi.Schema(  # ✔ fixed
-                type=openapi.TYPE_INTEGER,
-                description="ID of the nutritionist"
-            )
-        },
-        required=["user_id", "nutritionist_id"]  # ✔ fixed
-    ),
-    responses={
-        200: 'Nutritionist assigned successfully',
-        400: 'Validation error',
-        404: 'User or nutritionist not found',
-        500: 'Error assigning nutritionist'
-    }
-)
-
-    def post(self, request):
-        try:
-            user_id = request.data.get("user_id")
-            nutritionist_id = request.data.get("nutritionist_id")
-
-            if not user_id or not nutritionist_id:
-                return Response({"error": "user_id and nutritionist_id are required"}, status=status.HTTP_400_BAD_REQUEST)
-
-            if int(user_id) == int(nutritionist_id):
-                return Response({"error": "User and nutritionist cannot be same"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Fetch patient (UserProfile)
-            patient = UserProfile.objects.filter(id=user_id).first()
-            if not patient:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            # Fetch nutritionist UserProfile
-            nutritionist_user = UserProfile.objects.filter(id=nutritionist_id).first()
-            if not nutritionist_user:
-                return Response({"error": "Nutritionist not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            if nutritionist_user.role.lower() != "nutritionist":
-                return Response({"error": "Selected user is not a nutritionist"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Get the NutritionistProfile for this user
-            nutritionist_profile = NutritionistProfile.objects.filter(user_id=nutritionist_id).first()
-            if not nutritionist_profile:
-                return Response({"error": "Nutritionist profile not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            with transaction.atomic():
-                # Prevent duplicate assignment
-                already = PatientAssignment.objects.filter(
-                    nutritionist_id=nutritionist_id,
-                    patient_id=user_id
-                ).exists()
-                if already:
-                    return Response({"error": "Patient already assigned to this nutritionist"}, status=status.HTTP_400_BAD_REQUEST)
-
-                PatientAssignment.objects.create(
-                    nutritionist_id=nutritionist_id,
-                    patient_id=user_id
-                )
-
-                # Create notifications for admin, user, and nutritionist
-                # Admin notification
-                Notification.objects.create(
-                    user=None,
-                    type="admin",
-                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to patient {patient.full_name}."
-                )
-                
-                # User notification
-                Notification.objects.create(
-                    user=patient,
-                    type="user",
-                    message=f"Nutritionist {nutritionist_user.full_name} has been assigned to you."
-                )
-                
-                # Nutritionist notification
-                Notification.objects.create(
-                    user=nutritionist_user,
-                    type="nutritionist",
-                    message=f"You have been assigned to patient {patient.full_name}."
-                )
-
-            return Response({
-                "message": "Nutritionist assigned successfully",
-                "data": {"user_id": patient.id, "nutritionist_id": nutritionist_user.id}
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            import traceback
-            print("ASSIGN ERROR:", traceback.format_exc())
-            return Response({"error": str(e), "message": "Something went wrong while assigning nutritionist"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-#=====================================================================================NUTRITIONIST LIST WITH PATIENT COUNT======================================================================#            
-class NutritionistListAPIView(APIView):
-    @swagger_auto_schema(
-          operation_summary="Nutritionist List",
-        operation_description="Get all nutritionists with patient count",
-        responses={200: "Success"}
-    )
-    def get(self, request):
-        nutritionists = NutritionistProfile.objects.all()
-
-        data = []
-        for n in nutritionists:
-            user = UserProfile.objects.filter(id=n.user_id).first()
-            patient_count = PatientAssignment.objects.filter(nutritionist_id=n.user_id).count()
-            data.append({
-                "id": n.id,
-                "user_id": n.user_id,
-                "user_name": user.full_name if user else f"User #{n.user_id}",
-                "email": user.email if user else None,
-                "nutritionist_type": n.nutritionist_type,
-                "is_virtual_enabled": n.is_virtual_enabled,
-                "is_verified": n.is_verified,
-                "patient_count": patient_count
-            })
-
-        return Response({
-            "success": True,
-            "data": data
-        })
-
-#=====================================================================================USERS WITH PAYMENT BUT NO PROFILE======================================================================#
-class UsersWithPaymentNoProfileAPI(APIView):
-
-    @swagger_auto_schema(
-        operation_description="Find users who have made payments but don't have a profile",
-        manual_parameters=[
-            openapi.Parameter('status', openapi.IN_QUERY, description='Filter by payment status (success/failed)', type=openapi.TYPE_STRING, required=False),
-        ],
-        responses={200: openapi.Response('List of users with payment details')}
-    )
-    def get(self, request):
-        try:
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed"
-                }, status=503)
-
-            status_filter = request.query_params.get('status')
-
-            # Get all payments
-            payments_query = SubscriptionPayment.objects.all()
-            if status_filter:
-                payments_query = payments_query.filter(status=status_filter)
-            
-            # Get all user IDs that have a health profile (userProfile_userprofile table)
-            existing_user_ids = set(
-                uid for uid in UserHealthProfile.objects.values_list('user_id', flat=True) if uid is not None
-            )
-            
-            # Get payment user IDs
-            payment_user_ids = set(payments_query.values_list('user_id', flat=True))
-            
-            # Find users with payments but no profile
-            missing_user_ids = payment_user_ids - existing_user_ids
-
-            # Get all payments for missing users
-            user_payments = payments_query.filter(
-                user_id__in=missing_user_ids
-            ).values('user_id', 'amount', 'plan_id', 'status', 'created_at').order_by('-created_at')
-
-            # Enrich with user names
-            user_map = {u.id: u.full_name for u in UserProfile.objects.filter(id__in=missing_user_ids)}
-            enriched = []
-            for p in user_payments:
-                enriched.append({
-                    "user_id": p['user_id'],
-                    "user_name": user_map.get(p['user_id'], f"User #{p['user_id']}"),
-                    "plan_id": p['plan_id'],
-                    "amount": p['amount'],
-                    "status": p['status'],
-                    "created_at": p['created_at'],
-                })
-
-            return Response({
-                "count": len(enriched),
-                "status_filter": status_filter or "all",
-                "total_missing_users": len(missing_user_ids),
-                "missing_user_ids": sorted([uid for uid in missing_user_ids if uid is not None]),
-                "users_data": enriched
-            })
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error retrieving payment data"
-            }, status=500)
-
-#============================user detail view with full CRUD operations====================================================================#
-class UserDetailView(APIView):
-
-    @swagger_auto_schema(
-        operation_description="Retrieve a specific user by ID",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: openapi.Response('User details', UserSerializer),
-            404: 'User not found'
-        }
-    )
-    def get(self, request, user_id):
-        """Retrieve a specific user by ID"""
-        try:
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed"
-                }, status=503)
-                
-            user = UserProfile.objects.get(id=user_id)
-            serializer = UserSerializer(user)
-            return Response(serializer.data)
-        except UserProfile.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error retrieving user"
-            }, status=500)
-
-    @swagger_auto_schema(
-        operation_description="Update a user (full update)",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        request_body=UserWriteSerializer,
-        responses={
-            200: openapi.Response('User updated successfully', UserSerializer),
-            400: 'Validation error',
-            404: 'User not found'
-        }
-    )
-    def put(self, request, user_id):
-        """Update a user (full update)"""
-        try:
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed"
-                }, status=503)
-                
-            user = UserProfile.objects.get(id=user_id)
-            serializer = UserWriteSerializer(user, data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response({
-                    "message": "User updated successfully",
-                    "data": UserSerializer(user).data
-                })
-            return Response(serializer.errors, status=400)
-        except UserProfile.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error updating user"
-            }, status=500)
-
-    @swagger_auto_schema(
-        operation_description="Partially update a user",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        request_body=UserWriteSerializer,
-        responses={
-            200: openapi.Response('User updated successfully', UserSerializer),
-            400: 'Validation error',
-            404: 'User not found'
-        }
-    )
-    def patch(self, request, user_id):
-        """Partially update a user"""
-        try:
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed"
-                }, status=503)
-                
-            user = UserProfile.objects.get(id=user_id)
-            serializer = UserWriteSerializer(user, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response({
-                    "message": "User updated successfully",
-                    "data": UserSerializer(user).data
-                })
-            return Response(serializer.errors, status=400)
-        except UserProfile.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error updating user"
-            }, status=500)
-
-    @swagger_auto_schema(
-        operation_description="Delete a user",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: 'User deleted successfully',
-            404: 'User not found'
-        }
-    )
-    def delete(self, request, user_id):
-        """Delete a user"""
-        try:
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed"
-                }, status=503)
-                
-            user = UserProfile.objects.get(id=user_id)
-            user.delete()
-            return Response({"message": "User deleted successfully"})
-        except UserProfile.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error deleting user"
-            }, status=500)
-            
-# ==========================================================================USER PLAN RENEWAL & UPDATE NOTIFICATION====================================================================#
-
-class UserPlanNotificationAPI(APIView):
-
-    @swagger_auto_schema(
-        operation_description="Notify users about plan renewal and upgrade",
-        responses={
-            200: "Notifications sent successfully",
-            500: "Error sending notifications"
-        }
-    )
-    def get(self, request):
-        try:
-            today = timezone.now().date()
-            upcoming_date = today + timedelta(days=3)
-
-            expiring_soon = UserSubscription.objects.filter(
-                end_date__range=[today, upcoming_date]
-            )
-            expired = UserSubscription.objects.filter(
-                end_date__lt=today
-            )
-
-            notified_users = set()
-            admins = UserProfile.objects.filter(role__iexact="admin")
-
-            # Expiring soon
-            for sub in expiring_soon:
-                user = UserProfile.objects.filter(id=sub.user_id).first()
-                user_name = user.full_name if user else f"User #{sub.user_id}"
-
-                Notification.objects.get_or_create(
-                    user_id=sub.user_id,
-                    type="user",
-                    message="⚠️ Your plan will expire soon. Upgrade your plan now to continue uninterrupted services."
-                )
-                
-                # for admin in admins:
-                #     Notification.objects.get_or_create(
-                #         user=admin,
-                #         type="admin",
-                #         message=f"⚠️ {user_name}'s plan is expiring in 3 days. Please follow up."
-                #         )
-                notified_users.add(sub.user_id)
-                
-
-            # Expired
-            for sub in expired:
-                user = UserProfile.objects.filter(id=sub.user_id).first()
-                user_name = user.full_name if user else f"User #{sub.user_id}"
-
-                Notification.objects.get_or_create(
-                    user_id=sub.user_id,
-                    type="user",
-                    message="❌ Your plan has expired. Please renew or upgrade your plan to regain access."
-                )
-                for admin in admins:
-                    Notification.objects.get_or_create(
-                        user=admin,
-                        type="admin",
-                        message=f"❌ {user_name}'s plan has expired. Please follow up."
-                        )
-                notified_users.add(sub.user_id)
-                
-            return Response({
-                "message": "Notifications sent successfully",
-                "total_users_notified": len(notified_users),
-                "users": list(notified_users)
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Something went wrong while sending notifications"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            
-            
-# ==========================================================================USER LOGIN POST MESSAGE TO ADMIN====================================================================#
-    
-
-
-class UserHealthProfileAPI(APIView):
-
-    @swagger_auto_schema(
-        operation_summary="Get User Health Profile",
-        operation_description="Fetch user health profile by user ID",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: "User health profile fetched successfully",
-            404: "Health profile not found"
-        },
-        tags=["users"]
-    )
-    def get(self, request, user_id):
-        try:
-            profile = UserHealthProfile.objects.filter(user_id=user_id).first()
-            if not profile:
-                return Response({"error": "Health profile not found"}, status=404)
-
-            return Response({
-                "user_id": profile.user_id,
-                "date_of_birth": profile.date_of_birth,
-                "country": profile.country,
-                "mobile_number": profile.mobile_number,
-                "gender": profile.gender,
-                "occupation": profile.occupation,
-                "height_cm": profile.height_cm,
-                "weight_kg": profile.weight_kg,
-                "activity_level": profile.activity_level,
-                "goal": profile.goal,
-                "diet_type": profile.diet_type,
-                "allergies": profile.allergies,
-                "is_diabetic": profile.is_diabetic,
-                "is_hypertensive": profile.is_hypertensive,
-                "has_heart_condition": profile.has_heart_condition,
-                "has_thyroid_disorder": profile.has_thyroid_disorder,
-                "has_arthritis": profile.has_arthritis,
-                "has_gastric_issues": profile.has_gastric_issues,
-                "other_chronic_condition": profile.other_chronic_condition,
-                "family_history": profile.family_history,
-                "due_date": profile.due_date,
-                "is_breastfeeding": profile.is_breastfeeding,
-                "is_pregnant": profile.is_pregnant,
-                "city": profile.city,
-            })
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-class SubscribedUsersAPI(APIView):
-
-    @swagger_auto_schema(
-        operation_summary="Get Subscribed Users",
-        operation_description="Fetch all users who have successful subscription payments",
-        responses={
-            200: UserSerializer(many=True)
-        },
-        tags=["users"]
-    )
-    def get(self, request):
-        try:
-            paid_user_ids = set(
-                SubscriptionPayment.objects.filter(
-                    status="success"
-                ).values_list('user_id', flat=True)
-            )
-
-            users = UserProfile.objects.filter(
-                id__in=paid_user_ids
-            ).order_by("full_name")
-
-            serializer = UserSerializer(users, many=True)
-
-            return Response({
-                "results": serializer.data
-            })
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-class UserListCreateView(APIView):
-
-    @swagger_auto_schema(
-        operation_description="List all users",
-        responses={200: openapi.Response('List of users', UserSerializer(many=True))}
-    )
-    def get(self, request):
-        try:
-            if not check_db_connection():
-                return Response({"error": "Database connection failed"}, status=503)
-
-            search = request.query_params.get("search", "")
-            role = request.query_params.get("role", "")
-            status_filter = request.query_params.get("status", "")
-            date_filter = request.query_params.get("date", "")
-            month_filter = request.query_params.get("month", "")
-            year_filter = request.query_params.get("year", "")
-            city_filter = request.query_params.get("city", "")
-            page = int(request.query_params.get("page", 1))
-            page_size = int(request.query_params.get("page_size", 10))
-
-            users = UserProfile.objects.all().order_by("-date_joined")
-
-            if search:
-                users = users.filter(Q(full_name__icontains=search) | Q(email__icontains=search))
-            if role:
-                users = users.filter(role__iexact=role)
-            if status_filter == "active":
-                users = users.filter(is_active=True)
-            elif status_filter == "inactive":
-                users = users.filter(is_active=False)
-            if date_filter:
-                users = users.filter(date_joined__date=date_filter)
-            elif month_filter and year_filter:
-                users = users.filter(date_joined__month=month_filter, date_joined__year=year_filter)
-            elif year_filter:
-                users = users.filter(date_joined__year=year_filter)
-            if city_filter:
-                city_user_ids = UserHealthProfile.objects.filter(
-                    city__icontains=city_filter
-                ).values_list('user_id', flat=True)
-                users = users.filter(id__in=city_user_ids)
-
-            country_filter = request.query_params.get("country", "")
-            if country_filter:
-                country_user_ids = UserHealthProfile.objects.filter(
-                    country__icontains=country_filter
-                ).values_list('user_id', flat=True)
-                users = users.filter(id__in=country_user_ids)
-
-            total = users.count()
-            start = (page - 1) * page_size
-            user_list = list(users[start:start + page_size])
-
-            result = []
-            for u in user_list:
-                try:
-                    hp = UserHealthProfile.objects.filter(user_id=u.id).first()
-                    city = hp.city if hp else None
-                except Exception:
-                    city = None
-
-                # Get active subscription plan
-                try:
-                    from subscription.models import UserSubscription, SubscriptionPlan
-                    sub = UserSubscription.objects.filter(user_id=u.id, is_active=True).first()
-                    plan_name = None
-                    if sub:
-                        plan = SubscriptionPlan.objects.filter(id=sub.plan_id).first()
-                        plan_name = plan.name if plan else None
-                except Exception:
-                    plan_name = None
-
-                result.append({
-                    "id": u.id,
-                    "full_name": u.full_name,
-                    "email": u.email,
-                    "role": u.role,
-                    "plan": plan_name,
-                    "city": city,
-                    "is_active": u.is_active,
-                    "date_joined": u.date_joined,
-                })
-
-            return Response({
-                "total": total,
-                "page": page,
-                "page_size": page_size,
-                "total_pages": (total + page_size - 1) // page_size,
-                "results": result
-            })
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-    @swagger_auto_schema(
-        operation_description="Create a new user",
-        request_body=UserWriteSerializer,
-        responses={
-            201: openapi.Response('User created successfully', UserSerializer),
-            400: 'Validation error',
-            503: 'Database connection error'
-        }
-    )
-    def post(self, request):
-        try:
-            # DB check
-            if not check_db_connection():
-                return Response({
-                    "error": "Database connection failed",
-                    "message": "Unable to connect to the database"
-                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-            #  Serializer
-            serializer = UserWriteSerializer(data=request.data)
-
-            if not serializer.is_valid():
-                return Response({
-                    "error": "Validation failed",
-                    "details": serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            #  Save user
-            user = serializer.save()
-
-            #  Admin Notification
-            try:
-                Notification.objects.create(
-                    user=None, 
-                    type="admin",
-                    message=f"New user {user.full_name} registered. Please assign a nutritionist."
-                    )
-            except Exception as e:
-                print(f"Admin notification error: {e}")
-
-            #  WebSocket Notification
-            try:
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    "notifications",
-                    {
-                        "type": "send_notification",
-                        "message": f"New user {user.full_name} created 🚀"
-                    }
-                )
-            except Exception as e:
-                print(f"WebSocket error: {e}")
-
-            #  Response
-            return Response({
-                "message": "User created successfully",
-                "data": UserSerializer(user).data
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            return Response({
-                "error": str(e),
-                "message": "Error creating user"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-#==========================================AVAILABLE NUTRITIONISTS FOR PATIENT===========================================#
-
-PLAN_NUTRITIONIST_MAP = {
-    'free': [],
-    'basic': ['inhouse', 'expert'],
-    'silver': ['inhouse', 'expert'],
-    'premium': ['inhouse', 'expert'],
-    'hero': ['inhouse', 'expert'],
-    'nutritionist full access': ['inhouse', 'expert'],
-}
-
-class AvailableNutritionistsView(APIView):
-
-    @swagger_auto_schema(
-        operation_summary="Get available nutritionists for a patient",
-        operation_description="""
-        Patient ke subscription plan ke basis par available nutritionists return karta hai.
-
-        **Plan Rules:**
-        - basic → Inhouse Expert only
-        - silver → Expert only
-        - premium → Both Inhouse Expert + Expert
-
-        Saare nutritionists ka plan hero hota hai.
-        """,
-        manual_parameters=[
-            openapi.Parameter(
-                name='patient_id',
-                in_=openapi.IN_QUERY,
-                description="Patient ka User ID",
-                type=openapi.TYPE_INTEGER,
-                required=True,
-            )
-        ],
-        responses={
-            200: openapi.Response(
-                description="Available nutritionists list",
-                examples={
-                    "application/json": {
-                        "patient_id": 2,
-                        "patient_plan": "basic",
-                        "allowed_nutritionist_types": ["inhouse_expert"],
-                        "total": 1,
-                        "nutritionists": [
-                            {
-                                "id": 3,
-                                "full_name": "Dr. Abhay",
-                                "email": "nutritionist@gmail.com",
-                                "nutritionist_type": "inhouse_expert",
-                                "plan": "hero"
-                            }
-                        ]
-                    }
-                }
-            ),
-            400: openapi.Response(
-                description="Bad Request",
-                examples={
-                    "application/json": {
-                        "error": "patient_id is required."
-                    }
-                }
-            ),
-            404: openapi.Response(
-                description="Patient Not Found",
-                examples={
-                    "application/json": {
-                        "error": "Patient not found."
-                    }
-                }
-            ),
-        },
-        tags=["users"]
-    )
-    def get(self, request):
-        patient_id = request.query_params.get('patient_id')
-
-        if not patient_id:
-            return Response({"error": "patient_id is required."}, status=400)
-
-        try:
-            patient = UserProfile.objects.get(id=patient_id, role='user')
-        except UserProfile.DoesNotExist:
-            return Response({"error": "Patient not found."}, status=404)
-
-        # 🔥 Plan fetch (IMPORTANT)
-        from subscription.models import UserSubscription, SubscriptionPlan
-
-# Get active subscription
-        subscription = UserSubscription.objects.filter(
-            user_id=patient.id,
-            is_active=True
-        ).first()
-
-        if not subscription:
-            return Response({"error": "No active subscription"}, status=400)
-
-        plan = SubscriptionPlan.objects.filter(id=subscription.plan_id).first()
-        if not plan:
-            return Response({"error": "Plan not found"}, status=400)
-
-        patient_plan = plan.name.lower().strip()
-        if not patient_plan:
-            return Response({"error": "Patient ka koi plan assign nahi hai."}, status=400)
-        
-
-        allowed_types = PLAN_NUTRITIONIST_MAP.get(patient_plan)
-
-        if allowed_types is None:
-            return Response({
-                "error": f"Invalid plan '{patient_plan}'"
-            }, status=400)
-
-        # ✅ MAIN FILTER
-        nutritionists = UserProfile.objects.filter(
-            role='nutritionist',
-            nutritionist_type__in=allowed_types,
-            is_active=True
-        ).values(
-            'id', 'full_name', 'email', 'nutritionist_type'
-        )
-
-        return Response({
-            "patient_id": int(patient_id),
-            "patient_plan": patient_plan,
-            "allowed_nutritionist_types": allowed_types,
-            "total": nutritionists.count(),
-            "nutritionists": list(nutritionists)
-        })
-
-
-
-#==========================================ELIGIBLE USERS FOR NUTRITIONIST ASSIGNMENT===========================================#
-
-class EligibleUsersForNutritionistAPI(APIView):
-    """
-    Get users eligible for nutritionist assignment based on:
-    1. User has a subscription (purchased a plan)
-    2. User is not already assigned to a nutritionist
-    3. Filter by nutritionist type (inhouse_expert or expert)
-    """
-
-    @swagger_auto_schema(
-        operation_summary="Get eligible users for nutritionist assignment",
-        operation_description="""
-        Returns users who:
-        - Have purchased a subscription plan
-        - Are not already assigned to a nutritionist
-        - Match the nutritionist type based on their plan
-        
-        Query Parameters:
-        - nutritionist_type: 'inhouse_expert' or 'expert' (optional, returns all if not specified)
-        """,
-        manual_parameters=[
-            openapi.Parameter(
-                name='nutritionist_type',
-                in_=openapi.IN_QUERY,
-                description="Filter by nutritionist type: 'inhouse_expert' or 'expert'",
-                type=openapi.TYPE_STRING,
-                required=False
-            )
-        ],
-        responses={
-            200: openapi.Response('List of eligible users'),
-            400: 'Invalid nutritionist type'
-        }
-    )
-    def get(self, request):
-        try:
-            nutritionist_type = request.query_params.get('nutritionist_type', '').lower().strip()
-            
-            # Get all users with subscriptions (active or not, just need to have purchased)
-            all_subscriptions = UserSubscription.objects.all().values_list('user_id', 'plan_id')
-            
-            user_ids_with_plans = [sub[0] for sub in all_subscriptions]
-            plan_ids = {sub[0]: sub[1] for sub in all_subscriptions}
-            
-            print(f"[DEBUG] Total users with subscriptions: {len(user_ids_with_plans)}")
-            
-            # Get all users with subscriptions
-            users_with_plans = UserProfile.objects.filter(
-                id__in=user_ids_with_plans,
-                role='user',
-                is_active=True
-            )
-            
-            print(f"[DEBUG] Active users with subscriptions: {users_with_plans.count()}")
-            
-            # Get already assigned users
-            assigned_users = PatientAssignment.objects.all().values_list('patient_id', flat=True)
-            
-            print(f"[DEBUG] Already assigned users: {len(assigned_users)}")
-            
-            # Filter out already assigned users
-            eligible_users = users_with_plans.exclude(id__in=assigned_users)
-            
-            print(f"[DEBUG] Eligible users (not assigned): {eligible_users.count()}")
-            
-            # Build response with plan information
-            result = []
-            for user in eligible_users:
-                plan_id = plan_ids.get(user.id)
-                plan = SubscriptionPlan.objects.filter(id=plan_id).first()
-                
-                if not plan:
-                    print(f"[DEBUG] Plan not found for user {user.id}, plan_id: {plan_id}")
-                    continue
-                
-                plan_name = plan.name.lower().strip()
-                allowed_types = list(PLAN_NUTRITIONIST_MAP.get(plan_name, []))
-                
-                # If plan not found in map, try to infer from inhouse_consults and expert_consults
-                if not allowed_types:
-                    if plan.inhouse_consults > 0:
-                        allowed_types.append('inhouse')
-                    if plan.expert_consults > 0:
-                        allowed_types.append('expert')
-                
-                print(f"[DEBUG] User {user.id} ({user.full_name}): plan_obj.name={plan.name}, plan_name={plan_name}, inhouse={plan.inhouse_consults}, expert={plan.expert_consults}, allowed_types={allowed_types}")
-                
-                # Filter by nutritionist type if specified
-                if nutritionist_type:
-                    if nutritionist_type not in allowed_types:
-                        print(f"[DEBUG] User {user.id} filtered out: {nutritionist_type} not in {allowed_types}")
-                        continue
-                    user_allowed_types = [nutritionist_type]
-                else:
-                    user_allowed_types = allowed_types
-                
-                subscription = UserSubscription.objects.filter(
-                    user_id=user.id,
-                    plan_id=plan_id
-                ).first()
-                
-                result.append({
-                    'id': user.id,
-                    'full_name': user.full_name,
-                    'email': user.email,
-                    'plan_name': plan_name,
-                    'plan_id': plan_id,
-                    'allowed_nutritionist_types': user_allowed_types,
-                    'subscription_end_date': subscription.end_date if subscription else None
-                })
-            
-            print(f"[DEBUG] Final result count: {len(result)}")
-            
-            return Response({
-                'total': len(result),
-                'nutritionist_type_filter': nutritionist_type or 'all',
-                'users': result
-            })
-            
-        except Exception as e:
-            import traceback
-            print(f"[ERROR] {str(e)}")
-            print(traceback.format_exc())
-            return Response({
-                'error': str(e),
-                'total': 0,
-                'users': []
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-
-
-#==========================================DEBUG ENDPOINT FOR SUBSCRIPTIONS===========================================#
-
-class DebugSubscriptionsAPI(APIView):
-    """Debug endpoint to check subscriptions and assignments"""
-    
-    def get(self, request):
-        try:
-            from subscription.models import UserSubscription, SubscriptionPlan
-            
-            total_users = UserProfile.objects.filter(role='user').count()
-            total_subscriptions = UserSubscription.objects.count()
-            
-            # Try to get assignments - handle if table doesn't exist
-            try:
-                from nutritionist.models import PatientAssignment
-                total_assignments = PatientAssignment.objects.count()
-            except:
-                total_assignments = 0
-            
-            # Get sample subscriptions
-            sample_subs = UserSubscription.objects.all()[:5]
-            subs_data = []
-            for sub in sample_subs:
-                user = UserProfile.objects.filter(id=sub.user_id).first()
-                plan = SubscriptionPlan.objects.filter(id=sub.plan_id).first()
-                
-                # Check if assigned
-                try:
-                    from nutritionist.models import PatientAssignment
-                    assigned = PatientAssignment.objects.filter(patient_id=sub.user_id).exists()
-                except:
-                    assigned = False
-                
-                subs_data.append({
-                    'user_id': sub.user_id,
-                    'user_name': user.full_name if user else 'Unknown',
-                    'plan_id': sub.plan_id,
-                    'plan_name': plan.name if plan else 'Unknown',
-                    'plan_inhouse': plan.inhouse_consults if plan else 0,
-                    'plan_expert': plan.expert_consults if plan else 0,
-                    'is_active': sub.is_active,
-                    'end_date': str(sub.end_date),
-                    'already_assigned': assigned
-                })
-            
-            return Response({
-                'total_users': total_users,
-                'total_subscriptions': total_subscriptions,
-                'total_active_assignments': total_assignments,
-                'sample_subscriptions': subs_data
-            })
-        except Exception as e:
-            import traceback
-            return Response({
-                'error': str(e),
-                'traceback': traceback.format_exc()
-            }, status=400)
-
-
-
-class AssignedNutritionistAPI(APIView):
-    """Get the assigned nutritionist for a patient"""
-    
-    @swagger_auto_schema(
-        operation_description="Get the assigned nutritionist for a patient",
-        manual_parameters=[
-            openapi.Parameter(
-                'user_id',
-                openapi.IN_PATH,
-                description='Patient User ID',
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: openapi.Response('Assigned nutritionist details'),
-            404: 'No assigned nutritionist found'
-        }
-    )
-    def get(self, request, user_id):
-        """Get the assigned nutritionist for a patient"""
-        try:
-            from nutritionist.models import PatientAssignment
-            
-            # Find the assignment for this patient
-            assignment = PatientAssignment.objects.filter(patient_id=user_id).first()
-            
-            if not assignment:
-                return Response(
-                    {"error": "No assigned nutritionist found"},
-                    status=404
-                )
-            
-            # Get the nutritionist details
-            nutritionist = UserProfile.objects.filter(id=assignment.nutritionist_id).first()
-            
-            if not nutritionist:
-                return Response(
-                    {"error": "Nutritionist not found"},
-                    status=404
-                )
-            
-            return Response({
-                "id": nutritionist.id,
-                "full_name": nutritionist.full_name,
-                "email": nutritionist.email,
-                "role": nutritionist.role
-            })
-            
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=500
-            )
-
-
-# ===================== PASSWORD RESET REQUEST ===================== #
-
-class ForgotPasswordAPI(APIView):
-    @swagger_auto_schema(
-        operation_summary="Forgot Password",
-        operation_description="Email bhejo — auto-generated new password email pe aayega",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['email'],
-            properties={
-                'email': openapi.Schema(type=openapi.TYPE_STRING, description='User email address'),
-            }
-        ),
-        responses={
-            200: 'New password sent to email',
-            404: 'User not found',
-            500: 'Email sending failed',
-        },
-        tags=["auth"]
-    )
-    def post(self, request):
-        try:
-            import secrets, string
-            from django.core.mail import send_mail
-            from django.conf import settings
-
-            email = request.data.get('email', '').strip()
-
-            if not email:
-                return Response({"error": "email is required"}, status=400)
-
-            user = UserProfile.objects.filter(email__iexact=email).first()
-            if not user:
-                return Response({"error": "No user found with this email"}, status=404)
-
-            # Generate random 10-char password
-            chars = string.ascii_letters + string.digits + "!@#$"
-            new_password = ''.join(secrets.choice(chars) for _ in range(10))
-
-            # Save to DB
-            user.password = new_password
-            user.save()
-
-            # Send email
-            try:
-                send_mail(
-                    subject='🔐 Your TrackIntake Password Has Been Reset',
-                    message=(
-                        f'Hello {user.full_name},\n\n'
-                        f'Your password has been reset.\n\n'
-                        f'New Password: {new_password}\n\n'
-                        f'Please login and change your password immediately.\n\n'
-                        f'— TrackIntake Team'
-                    ),
-                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@trackintake.com'),
-                    recipient_list=[email],
-                    fail_silently=False,
-                )
-                return Response({
-                    "success": True,
-                    "message": f"New password sent to {email} successfully"
-                }, status=200)
-
-            except Exception as mail_error:
-                # Email fail hone par bhi password reset hua — debug ke liye print
-                print(f"EMAIL ERROR: {mail_error}")
-                return Response({
-                    "success": False,
-                    "error": str(mail_error),
-                    "message": "Password was reset but email could not be sent. Check EMAIL settings."
-                }, status=500)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-# ===================== RESET PASSWORD API ===================== #
-
-class ResetPasswordAPI(APIView):
-    @swagger_auto_schema(
-        operation_summary="Reset Password",
-        operation_description="Admin kisi bhi user ka password change kar sakta hai user_id se",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=['user_id', 'new_password', 'confirm_password'],
-            properties={
-                'user_id':          openapi.Schema(type=openapi.TYPE_INTEGER, description='User ID'),
-                'new_password':     openapi.Schema(type=openapi.TYPE_STRING,  description='New password (min 6 chars)'),
-                'confirm_password': openapi.Schema(type=openapi.TYPE_STRING,  description='Confirm new password'),
-            }
-        ),
-        responses={
-            200: 'Password reset successfully',
-            400: 'Validation error',
-            404: 'User not found',
-        },
-        tags=["auth"]
-    )
-    def post(self, request):
-        try:
-            user_id          = request.data.get('user_id')
-            new_password     = request.data.get('new_password', '').strip()
-            confirm_password = request.data.get('confirm_password', '').strip()
-
-            # Validations
-            if not user_id:
-                return Response({"error": "user_id is required"}, status=400)
-            if not new_password:
-                return Response({"error": "new_password is required"}, status=400)
-            if new_password != confirm_password:
-                return Response({"error": "Passwords do not match"}, status=400)
-            if len(new_password) < 6:
-                return Response({"error": "Password must be at least 6 characters"}, status=400)
-
-            user = UserProfile.objects.filter(id=user_id).first()
-            if not user:
-                return Response({"error": "User not found"}, status=404)
-
-            # Save plain-text password (aapka existing system plain-text use karta hai)
-            user.password = new_password
-            user.save()
-
-            return Response({
-                "success": True,
-                "message": f"Password for '{user.full_name}' has been reset successfully"
-            }, status=200)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
 
 
 # ===================== ADMIN LOGIN ===================== #
 class AdminLoginAPI(APIView):
-    """Admin login endpoint"""
-
-    @swagger_auto_schema(
-        operation_description="Admin login with email and password",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                "email": openapi.Schema(type=openapi.TYPE_STRING, description="Admin email"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, description="Admin password")
-            },
-            required=["email", "password"]
-        ),
-        responses={
-            200: openapi.Response('Login successful'),
-            400: 'Invalid credentials',
-            401: 'Unauthorized - not an admin'
-        }
-    )
+    """Admin login endpoint using raw SQL against user_user"""
     def post(self, request):
         try:
-            email    = request.data.get("email", "").strip()
+            email = request.data.get("email", "").strip()
             password = request.data.get("password", "").strip()
 
             if not email or not password:
@@ -1272,21 +29,45 @@ class AdminLoginAPI(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            user_profile = UserProfile.objects.filter(email__iexact=email).first()
+            query = """
+                SELECT id, full_name, email, password, role, is_admin, is_active
+                FROM user_user
+                WHERE LOWER(email) = LOWER(%s)
+                LIMIT 1;
+            """
+            with connection.cursor() as cursor:
+                cursor.execute(query, [email])
+                row = cursor.fetchone()
 
-            if not user_profile:
+            if not row:
                 return Response(
                     {"error": "Invalid email or password"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            if user_profile.role.lower() != "admin":
+            user_id, full_name, db_email, db_password, role, is_admin, is_active = row
+
+            if not is_active:
+                return Response(
+                    {"error": "This account has been disabled or blocked by an administrator. Login access is denied."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if str(role).lower() != "admin" and not is_admin:
                 return Response(
                     {"error": "Only admins can access this panel"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
 
-            if user_profile.password != password:
+            # Check password: supports plain text or Django PBKDF2 hash
+            valid = (db_password == password)
+            if not valid:
+                try:
+                    valid = check_password(password, db_password)
+                except Exception:
+                    valid = False
+
+            if not valid:
                 return Response(
                     {"error": "Invalid email or password"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -1295,15 +76,866 @@ class AdminLoginAPI(APIView):
             return Response({
                 "message": "Login successful",
                 "user": {
-                    "id":        user_profile.id,
-                    "full_name": user_profile.full_name,
-                    "email":     user_profile.email,
-                    "role":      user_profile.role
+                    "id": user_id,
+                    "full_name": full_name,
+                    "email": db_email,
+                    "role": role
                 }
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ===================== USER LIST & CREATE ===================== #
+class UserListCreateView(APIView):
+    def get(self, request):
+        search = request.query_params.get("search", "").strip()
+        role = request.query_params.get("role", "").strip()
+        status_filter = request.query_params.get("status", "").strip()
+        date_filter = request.query_params.get("date", "").strip()
+        month_filter = request.query_params.get("month", "").strip()
+        year_filter = request.query_params.get("year", "").strip()
+        city_filter = request.query_params.get("city", "").strip()
+        country_filter = request.query_params.get("country", "").strip()
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 10))
+        offset = (page - 1) * page_size
+
+        where = ["1=1"]
+        params = []
+
+        if search:
+            where.append("(u.full_name ILIKE %s OR u.email ILIKE %s OR u.phone_number ILIKE %s)")
+            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+
+        if role and role.lower() != "all":
+            if role.lower() in ("inhouse", "in_house"):
+                where.append("(LOWER(u.role) = 'nutritionist' AND LOWER(COALESCE(np.nutritionist_type, u.nutritionist_type, 'inhouse')) IN ('inhouse', 'in_house'))")
+            elif role.lower() == "expert":
+                where.append("(LOWER(u.role) = 'nutritionist' AND LOWER(COALESCE(np.nutritionist_type, u.nutritionist_type, '')) = 'expert')")
+            else:
+                where.append("LOWER(u.role) = LOWER(%s)")
+                params.append(role)
+
+        if status_filter.lower() == "active":
+            where.append("u.is_active = true")
+        elif status_filter.lower() == "inactive":
+            where.append("u.is_active = false")
+
+        if date_filter:
+            where.append("DATE(u.date_joined) = %s")
+            params.append(date_filter)
+        elif month_filter and year_filter:
+            where.append("EXTRACT(MONTH FROM u.date_joined) = %s AND EXTRACT(YEAR FROM u.date_joined) = %s")
+            params.extend([int(month_filter), int(year_filter)])
+        elif year_filter:
+            where.append("EXTRACT(YEAR FROM u.date_joined) = %s")
+            params.append(int(year_filter))
+
+        if city_filter:
+            where.append("hp.city ILIKE %s")
+            params.append(f"%{city_filter}%")
+
+        if country_filter:
+            where.append("hp.country ILIKE %s")
+            params.append(f"%{country_filter}%")
+
+        where_sql = " AND ".join(where)
+
+        count_query = f"""
+            SELECT COUNT(DISTINCT u.id)
+            FROM user_user u
+            LEFT JOIN "userProfile_userprofile" hp ON u.id = hp.user_id
+            LEFT JOIN nutritionist_nutritionistprofile np ON u.id = np.user_id
+            WHERE {where_sql};
+        """
+
+        data_query = f"""
+            SELECT 
+                u.id, u.full_name, u.email, u.phone_number, u.role, u.is_active, u.date_joined,
+                COALESCE(np.nutritionist_type, u.nutritionist_type, '') as nutritionist_type,
+                u.is_nutritionist_approved, u.is_admin,
+                hp.city,
+                (SELECT pl.name FROM subscriptions_usersubscription us 
+                 JOIN subscriptions_plan pl ON us.plan_id = pl.id 
+                 WHERE us.user_id = u.id AND us.is_active = true LIMIT 1) as plan_name
+            FROM user_user u
+            LEFT JOIN "userProfile_userprofile" hp ON u.id = hp.user_id
+            LEFT JOIN nutritionist_nutritionistprofile np ON u.id = np.user_id
+            WHERE {where_sql}
+            ORDER BY u.date_joined DESC
+            LIMIT %s OFFSET %s;
+        """
+
+        with connection.cursor() as cursor:
+            # Global overview counts for KPI cards
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_users,
+                    COUNT(*) FILTER (WHERE LOWER(u.role) = 'user') as total_patients,
+                    COUNT(*) FILTER (WHERE LOWER(u.role) = 'nutritionist') as total_nutritionists,
+                    COUNT(*) FILTER (WHERE LOWER(u.role) = 'nutritionist' AND (LOWER(COALESCE(np.nutritionist_type, u.nutritionist_type, '')) IN ('inhouse', 'in_house'))) as inhouse,
+                    COUNT(*) FILTER (WHERE LOWER(u.role) = 'nutritionist' AND (LOWER(COALESCE(np.nutritionist_type, u.nutritionist_type, '')) = 'expert')) as expert,
+                    COUNT(*) FILTER (WHERE u.is_active = true) as active_users
+                FROM user_user u
+                LEFT JOIN nutritionist_nutritionistprofile np ON u.id = np.user_id;
+            """)
+            g_row = cursor.fetchone() or (0, 0, 0, 0, 0, 0)
+            metrics = {
+                "total_users": g_row[0] or 0,
+                "total_patients": g_row[1] or 0,
+                "total_nutritionists": g_row[2] or 0,
+                "inhouse_nutritionists": g_row[3] or 0,
+                "expert_nutritionists": g_row[4] or 0,
+                "active_users": g_row[5] or 0,
+            }
+
+            cursor.execute(count_query, params)
+            total = cursor.fetchone()[0]
+
+            cursor.execute(data_query, params + [page_size, offset])
+            rows = cursor.fetchall()
+
+        results = []
+        for r in rows:
+            results.append({
+                "id": r[0],
+                "full_name": r[1],
+                "email": r[2],
+                "phone_number": r[3],
+                "role": r[4],
+                "is_active": bool(r[5]),
+                "date_joined": r[6].isoformat() if r[6] else None,
+                "nutritionist_type": r[7],
+                "is_nutritionist_approved": bool(r[8]),
+                "is_admin": bool(r[9]),
+                "city": r[10],
+                "plan": r[11],
+            })
+
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        return Response({
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "metrics": metrics,
+            "results": results
+        })
+
+    def post(self, request):
+        full_name = request.data.get("full_name", "").strip()
+        email = request.data.get("email", "").strip()
+        phone_number = request.data.get("phone_number", "").strip()
+        password = request.data.get("password", "").strip()
+        role = request.data.get("role", "user").strip()
+
+        if not full_name or not email:
+            return Response({"error": "full_name and email are required"}, status=400)
+
+        now_utc = datetime.now(timezone.utc)
+        query = """
+            INSERT INTO user_user (full_name, email, phone_number, password, role, is_active, is_admin, is_superuser, date_joined)
+            VALUES (%s, %s, %s, %s, %s, true, false, false, %s)
+            RETURNING id;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query, [full_name, email, phone_number, password, role, now_utc])
+            new_id = cursor.fetchone()[0]
+
+            # Broadcast real-time WebSocket notification if a new nutritionist registers
+            if str(role).lower() == "nutritionist":
+                try:
+                    nutri_type = request.data.get("nutritionist_type", "inhouse")
+                    from notifications.utils import notify_nutritionist_registered
+                    notify_nutritionist_registered(
+                        user_id=new_id,
+                        full_name=full_name,
+                        email=email,
+                        nutritionist_type=nutri_type
+                    )
+                except Exception as ex:
+                    print(f"[Nutritionist Registration Notification Warning]: {ex}")
+
+        return Response({"id": new_id, "message": "User created successfully"}, status=status.HTTP_201_CREATED)
+
+
+# ===================== USER DETAIL ===================== #
+class UserDetailView(APIView):
+    """
+    Complete 360-degree user profile view:
+    - User core data (user_user)
+    - Health profile (userProfile_userprofile)
+    - Nutritionist profile (nutritionist_nutritionistprofile)
+    - Subscriptions & Payments history
+    - Appointments history
+    - Editable via PUT / PATCH with pure parameterized raw SQL.
+    """
+    def get(self, request, user_id):
+        try:
+            with connection.cursor() as cursor:
+                # 1. Core user data
+                cursor.execute("""
+                    SELECT id, full_name, email, phone_number, role, is_active, is_admin,
+                           date_joined, last_login, plan, nutritionist_type, is_nutritionist_approved
+                    FROM user_user
+                    WHERE id = %s;
+                """, [user_id])
+                u = cursor.fetchone()
+                if not u:
+                    return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+                user_data = {
+                    "id": u[0],
+                    "full_name": u[1] or "",
+                    "email": u[2] or "",
+                    "phone_number": u[3] or "",
+                    "role": u[4] or "user",
+                    "is_active": bool(u[5]),
+                    "is_admin": bool(u[6]),
+                    "date_joined": u[7].isoformat() if u[7] else None,
+                    "last_login": u[8].isoformat() if u[8] else None,
+                    "plan": u[9] or "",
+                    "nutritionist_type": u[10] or "",
+                    "is_nutritionist_approved": bool(u[11]),
+                }
+
+                # 2. Health Profile
+                cursor.execute("""
+                    SELECT id, height_cm, weight_kg, diet_type, allergies, goal, activity_level,
+                           city, country, gender, date_of_birth, occupation,
+                           is_diabetic, is_hypertensive, has_heart_condition, has_thyroid_disorder,
+                           has_arthritis, has_gastric_issues, other_chronic_condition, family_history,
+                           is_pregnant, is_breastfeeding
+                    FROM "userProfile_userprofile"
+                    WHERE user_id = %s;
+                """, [user_id])
+                hp = cursor.fetchone()
+                health_profile = None
+                if hp:
+                    health_profile = {
+                        "id": hp[0],
+                        "height_cm": float(hp[1]) if hp[1] is not None else None,
+                        "weight_kg": float(hp[2]) if hp[2] is not None else None,
+                        "diet_type": hp[3] or "",
+                        "allergies": hp[4] or "",
+                        "goal": hp[5] or "",
+                        "activity_level": hp[6] or "",
+                        "city": hp[7] or "",
+                        "country": hp[8] or "",
+                        "gender": hp[9] or "",
+                        "date_of_birth": str(hp[10]) if hp[10] else None,
+                        "occupation": hp[11] or "",
+                        "is_diabetic": bool(hp[12]),
+                        "is_hypertensive": bool(hp[13]),
+                        "has_heart_condition": bool(hp[14]),
+                        "has_thyroid_disorder": bool(hp[15]),
+                        "has_arthritis": bool(hp[16]),
+                        "has_gastric_issues": bool(hp[17]),
+                        "other_chronic_condition": hp[18] or "",
+                        "family_history": hp[19] or "",
+                        "is_pregnant": bool(hp[20]),
+                        "is_breastfeeding": bool(hp[21]),
+                    }
+
+                # 3. Nutritionist Profile
+                cursor.execute("""
+                    SELECT id, nutritionist_type, is_verified, verified_at, years_of_experience,
+                           qualification, online_price, offline_price, pending_online_price, pending_offline_price,
+                           price_approval_status, price_rejection_reason, professional_title, professional_bio,
+                           specializations, languages_spoken, registration_number, issuing_authority,
+                           current_organization, offline_location, is_virtual_enabled,
+                           government_id, qualification_certificate, registration_certificate, experience_certificate
+                    FROM nutritionist_nutritionistprofile
+                    WHERE user_id = %s;
+                """, [user_id])
+                np = cursor.fetchone()
+                nutritionist_profile = None
+                if np:
+                    specs = np[14]
+                    if isinstance(specs, str):
+                        try: specs = json.loads(specs)
+                        except: specs = [specs]
+                    langs = np[15]
+                    if isinstance(langs, str):
+                        try: langs = json.loads(langs)
+                        except: langs = [langs]
+
+                    nutritionist_profile = {
+                        "id": np[0],
+                        "nutritionist_type": np[1] or "inhouse",
+                        "is_verified": bool(np[2]),
+                        "verified_at": np[3].isoformat() if np[3] else None,
+                        "years_of_experience": np[4] or 0,
+                        "qualification": np[5] or "",
+                        "online_price": float(np[6]) if np[6] else 0.0,
+                        "offline_price": float(np[7]) if np[7] else 0.0,
+                        "pending_online_price": float(np[8]) if np[8] else None,
+                        "pending_offline_price": float(np[9]) if np[9] else None,
+                        "price_approval_status": np[10] or "approved",
+                        "price_rejection_reason": np[11] or "",
+                        "professional_title": np[12] or "",
+                        "professional_bio": np[13] or "",
+                        "specializations": specs or [],
+                        "languages_spoken": langs or [],
+                        "registration_number": np[16] or "",
+                        "issuing_authority": np[17] or "",
+                        "current_organization": np[18] or "",
+                        "offline_location": np[19] or "",
+                        "is_virtual_enabled": bool(np[20]),
+                        "government_id": np[21] or "",
+                        "qualification_certificate": np[22] or "",
+                        "registration_certificate": np[23] or "",
+                        "experience_certificate": np[24] or "",
+                        "documents": {
+                            "government_id": np[21] or "",
+                            "qualification_certificate": np[22] or "",
+                            "registration_certificate": np[23] or "",
+                            "experience_certificate": np[24] or "",
+                        }
+                    }
+
+                # 4. Subscriptions
+                cursor.execute("""
+                    SELECT s.id, s.start_date, s.end_date, s.remaining_inhouse, s.remaining_expert,
+                           s.is_active, p.id as plan_id, COALESCE(p.name, 'Subscription Plan') as plan_name,
+                           COALESCE(p.price, 0) as price, s.created_at
+                    FROM subscriptions_usersubscription s
+                    LEFT JOIN subscriptions_plan p ON s.plan_id = p.id
+                    WHERE s.user_id = %s
+                    ORDER BY s.created_at DESC;
+                """, [user_id])
+                subscriptions = [
+                    {
+                        "id": r[0],
+                        "start_date": str(r[1]) if r[1] else None,
+                        "end_date": str(r[2]) if r[2] else None,
+                        "remaining_inhouse": r[3] or 0,
+                        "remaining_expert": r[4] or 0,
+                        "is_active": bool(r[5]),
+                        "plan_id": r[6],
+                        "plan_name": r[7],
+                        "price": r[8],
+                        "created_at": r[9].isoformat() if r[9] else None,
+                    }
+                    for r in cursor.fetchall()
+                ]
+
+                # 5. Payments
+                cursor.execute("""
+                    SELECT p.id, p.amount, p.status, p.razorpay_payment_id, p.created_at,
+                           COALESCE(pl.name, 'Plan #' || p.plan_id::text) as plan_name
+                    FROM subscriptions_payment p
+                    LEFT JOIN subscriptions_plan pl ON p.plan_id = pl.id
+                    WHERE p.user_id = %s
+                    ORDER BY p.created_at DESC;
+                """, [user_id])
+                payments = [
+                    {
+                        "id": r[0],
+                        "amount": r[1],
+                        "status": r[2],
+                        "razorpay_payment_id": r[3] or "",
+                        "created_at": r[4].isoformat() if r[4] else None,
+                        "plan_name": r[5],
+                    }
+                    for r in cursor.fetchall()
+                ]
+
+                # 6. Appointments
+                cursor.execute("""
+                    SELECT a.id, a.slot_date, a.slot_start_time, a.appointment_category,
+                           a.appointment_type, a.status, COALESCE(a.fee_amount, 0),
+                           COALESCE(a.payment_status, 'UNPAID'),
+                           n.full_name as nutri_name, p.full_name as patient_name,
+                           a.created_at
+                    FROM appointments_appointment a
+                    LEFT JOIN user_user n ON a.nutritionist_id = n.id
+                    LEFT JOIN user_user p ON a.patient_id = p.id
+                    WHERE a.patient_id = %s OR a.nutritionist_id = %s
+                    ORDER BY a.created_at DESC
+                    LIMIT 10;
+                """, [user_id, user_id])
+                appointments = [
+                    {
+                        "id": r[0],
+                        "slot_date": str(r[1]) if r[1] else None,
+                        "slot_start_time": str(r[2]) if r[2] else None,
+                        "category": r[3] or "IN_HOUSE",
+                        "type": r[4] or "VIRTUAL",
+                        "status": r[5] or "CONFIRMED",
+                        "fee_amount": float(r[6]),
+                        "payment_status": r[7],
+                        "nutritionist_name": r[8] or "Nutritionist",
+                        "patient_name": r[9] or "Patient",
+                        "created_at": r[10].isoformat() if r[10] else None,
+                    }
+                    for r in cursor.fetchall()
+                ]
+
+            resp_data = {
+                **user_data,
+                "status": "success",
+                "user": user_data,
+                "health_profile": health_profile,
+                "nutritionist_profile": nutritionist_profile,
+                "subscriptions": subscriptions,
+                "payments": payments,
+                "appointments": appointments,
+            }
+            return Response(resp_data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, user_id):
+        return self.patch(request, user_id)
+
+    def patch(self, request, user_id):
+        try:
+            data = request.data
+            user_updates = []
+            user_params = []
+
+            # 1. Update user_user
+            for field in ["full_name", "email", "phone_number", "role", "is_active", "plan", "nutritionist_type"]:
+                if field in data:
+                    val = data[field]
+                    if field == "is_active":
+                        if isinstance(val, str):
+                            val = val.lower() in ("true", "1", "active")
+                        else:
+                            val = bool(val)
+                    user_updates.append(f"{field} = %s")
+                    user_params.append(val)
+
+            with connection.cursor() as cursor:
+                if user_updates:
+                    user_params.append(user_id)
+                    query = f"UPDATE user_user SET {', '.join(user_updates)} WHERE id = %s RETURNING id;"
+                    cursor.execute(query, user_params)
+                    if not cursor.fetchone():
+                        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+                # 2. Update or Insert Health Profile if health fields provided
+                health_data = data.get("health_profile") or data
+                hp_fields = [
+                    "height_cm", "weight_kg", "diet_type", "allergies", "goal", "activity_level",
+                    "city", "country", "gender", "occupation", "is_diabetic", "is_hypertensive",
+                    "has_heart_condition", "has_thyroid_disorder", "has_arthritis", "has_gastric_issues",
+                    "other_chronic_condition", "family_history"
+                ]
+                hp_updates = []
+                hp_params = []
+                for f in hp_fields:
+                    if f in health_data:
+                        hp_updates.append(f)
+                        hp_params.append(health_data[f])
+
+                if hp_updates:
+                    # Check if health profile exists
+                    cursor.execute('SELECT id FROM "userProfile_userprofile" WHERE user_id = %s;', [user_id])
+                    row = cursor.fetchone()
+                    if row:
+                        set_clauses = [f"{f} = %s" for f in hp_updates]
+                        q = f'UPDATE "userProfile_userprofile" SET {", ".join(set_clauses)} WHERE user_id = %s;'
+                        cursor.execute(q, hp_params + [user_id])
+                    else:
+                        cols = ["user_id"] + hp_updates
+                        placeholders = ", ".join(["%s"] * len(cols))
+                        q = f'INSERT INTO "userProfile_userprofile" ({", ".join(cols)}) VALUES ({placeholders});'
+                        cursor.execute(q, [user_id] + hp_params)
+
+                # 3. Update Nutritionist Profile if nutritionist fields provided
+                nutri_data = data.get("nutritionist_profile") or data
+                np_fields = [
+                    "nutritionist_type", "is_verified", "years_of_experience", "qualification",
+                    "online_price", "offline_price", "professional_title", "professional_bio",
+                    "current_organization", "offline_location", "registration_number", "issuing_authority"
+                ]
+                np_updates = []
+                np_params = []
+                for f in np_fields:
+                    if f in nutri_data:
+                        np_updates.append(f)
+                        np_params.append(nutri_data[f])
+
+                if np_updates:
+                    cursor.execute("SELECT id FROM nutritionist_nutritionistprofile WHERE user_id = %s;", [user_id])
+                    row = cursor.fetchone()
+                    if row:
+                        set_clauses = [f"{f} = %s" for f in np_updates]
+                        q = f"UPDATE nutritionist_nutritionistprofile SET {', '.join(set_clauses)} WHERE user_id = %s;"
+                        cursor.execute(q, np_params + [user_id])
+                    else:
+                        cols = ["user_id"] + np_updates
+                        placeholders = ", ".join(["%s"] * len(cols))
+                        q = f"INSERT INTO nutritionist_nutritionistprofile ({', '.join(cols)}) VALUES ({placeholders});"
+                        cursor.execute(q, [user_id] + np_params)
+
+            return Response({
+                "status": "success",
+                "message": "User profile updated successfully",
+                "id": user_id
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, user_id):
+        query = "UPDATE user_user SET is_active = false WHERE id = %s RETURNING id;"
+        with connection.cursor() as cursor:
+            cursor.execute(query, [user_id])
+            updated = cursor.fetchone()
+
+        if not updated:
+            return Response({"error": "User not found"}, status=404)
+
+        return Response({"message": "User access deactivated successfully"})
+
+
+# ===================== USER HEALTH PROFILE ===================== #
+class UserHealthProfileAPI(APIView):
+    def get(self, request, user_id):
+        query = """
+            SELECT user_id, date_of_birth, country, mobile_number, gender, occupation,
+                   height_cm, weight_kg, activity_level, goal, diet_type, allergies,
+                   is_diabetic, is_hypertensive, has_heart_condition, has_thyroid_disorder,
+                   has_arthritis, has_gastric_issues, is_pregnant, is_breastfeeding, city
+            FROM "userProfile_userprofile"
+            WHERE user_id = %s
+            LIMIT 1;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query, [user_id])
+            r = cursor.fetchone()
+
+        if not r:
+            return Response({"message": "No health profile found"}, status=404)
+
+        return Response({
+            "user_id": r[0],
+            "date_of_birth": str(r[1]) if r[1] else None,
+            "country": r[2],
+            "mobile_number": r[3],
+            "gender": r[4],
+            "occupation": r[5],
+            "height_cm": r[6],
+            "weight_kg": r[7],
+            "activity_level": r[8],
+            "goal": r[9],
+            "diet_type": r[10],
+            "allergies": r[11],
+            "is_diabetic": bool(r[12]),
+            "is_hypertensive": bool(r[13]),
+            "has_heart_condition": bool(r[14]),
+            "has_thyroid_disorder": bool(r[15]),
+            "has_arthritis": bool(r[16]),
+            "has_gastric_issues": bool(r[17]),
+            "is_pregnant": bool(r[18]),
+            "is_breastfeeding": bool(r[19]),
+            "city": r[20],
+        })
+
+
+# ===================== NUTRITIONISTS LIST & DETAILS ===================== #
+class NutritionistListAPIView(APIView):
+    def get(self, request):
+        query = """
+            SELECT 
+                u.id as user_id, u.full_name as user_name, u.email,
+                np.id, np.nutritionist_type, np.is_virtual_enabled, np.is_verified,
+                np.online_price, np.offline_price, np.years_of_experience, np.qualification,
+                np.registration_number, np.offline_location,
+                (SELECT COUNT(*) FROM nutritionist_patientassignment WHERE nutritionist_id = u.id) as patient_count
+            FROM user_user u
+            LEFT JOIN nutritionist_nutritionistprofile np ON u.id = np.user_id
+            WHERE LOWER(u.role) = 'nutritionist'
+            ORDER BY u.id DESC;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+        results = []
+        for r in rows:
+            results.append({
+                "id": r[3] or r[0],
+                "user_id": r[0],
+                "user_name": r[1] or f"Nutritionist #{r[0]}",
+                "email": r[2],
+                "nutritionist_type": r[4] or "inhouse",
+                "is_virtual_enabled": bool(r[5]),
+                "is_verified": bool(r[6]),
+                "online_price": r[7],
+                "offline_price": r[8],
+                "years_of_experience": r[9],
+                "qualification": r[10],
+                "registration_number": r[11],
+                "offline_location": r[12],
+                "patient_count": r[13] or 0
+            })
+
+        return Response({"status": "success", "count": len(results), "data": results})
+
+
+class AvailableNutritionistsView(APIView):
+    def get(self, request):
+        query = """
+            SELECT u.id, u.full_name, u.email, np.id as profile_id, np.nutritionist_type, np.is_verified
+            FROM user_user u
+            LEFT JOIN nutritionist_nutritionistprofile np ON u.id = np.user_id
+            WHERE LOWER(u.role) = 'nutritionist'
+            ORDER BY u.full_name ASC;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+        results = [
+            {
+                "id": r[0],
+                "full_name": r[1],
+                "email": r[2],
+                "profile_id": r[3],
+                "nutritionist_type": r[4] or "inhouse",
+                "is_verified": bool(r[5])
+            } for r in rows
+        ]
+        return Response(results)
+
+
+# ===================== PATIENT ASSIGNMENT ===================== #
+class AssignNutritionistAPI(APIView):
+    def post(self, request):
+        user_id = request.data.get("user_id")
+        nutritionist_id = request.data.get("nutritionist_id")
+
+        if not user_id or not nutritionist_id:
+            return Response({"error": "user_id and nutritionist_id are required"}, status=400)
+
+        now_utc = datetime.now(timezone.utc)
+        with connection.cursor() as cursor:
+            # Check user and nutritionist exist
+            cursor.execute("SELECT id FROM user_user WHERE id = %s;", [user_id])
+            if not cursor.fetchone():
+                return Response({"error": "User not found"}, status=404)
+
+            cursor.execute("SELECT id FROM user_user WHERE id = %s AND LOWER(role) = 'nutritionist';", [nutritionist_id])
+            if not cursor.fetchone():
+                return Response({"error": "Nutritionist not found"}, status=404)
+
+            # Check if assignment already exists
+            cursor.execute("SELECT id FROM nutritionist_patientassignment WHERE patient_id = %s;", [user_id])
+            existing = cursor.fetchone()
+
+            if existing:
+                cursor.execute(
+                    "UPDATE nutritionist_patientassignment SET nutritionist_id = %s, assigned_at = %s WHERE id = %s;",
+                    [nutritionist_id, now_utc, existing[0]]
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO nutritionist_patientassignment (patient_id, nutritionist_id, assigned_at) VALUES (%s, %s, %s);",
+                    [user_id, nutritionist_id, now_utc]
+                )
+
+        return Response({"message": "Nutritionist assigned successfully"}, status=200)
+
+
+class AssignedNutritionistAPI(APIView):
+    def get(self, request, user_id):
+        query = """
+            SELECT u.id, u.full_name, u.email, pa.assigned_at
+            FROM nutritionist_patientassignment pa
+            JOIN user_user u ON pa.nutritionist_id = u.id
+            WHERE pa.patient_id = %s
+            ORDER BY pa.assigned_at DESC
+            LIMIT 1;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query, [user_id])
+            r = cursor.fetchone()
+
+        if not r:
+            return Response({"message": "No nutritionist assigned"}, status=404)
+
+        return Response({
+            "id": r[0],
+            "full_name": r[1],
+            "email": r[2],
+            "assigned_at": r[3].isoformat() if r[3] else None
+        })
+
+
+class EligibleUsersForNutritionistAPI(APIView):
+    def get(self, request):
+        query = """
+            SELECT u.id, u.full_name, u.email, u.phone_number
+            FROM user_user u
+            WHERE LOWER(u.role) != 'nutritionist' AND LOWER(u.role) != 'admin'
+            ORDER BY u.date_joined DESC
+            LIMIT 200;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+        results = [{"id": r[0], "full_name": r[1], "email": r[2], "phone_number": r[3]} for r in rows]
+        return Response(results)
+
+
+# ===================== PASSWORD RESET & FORGOT ===================== #
+class ResetPasswordAPI(APIView):
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        new_password = request.data.get('new_password', '').strip()
+        confirm_password = request.data.get('confirm_password', '').strip()
+
+        if not user_id:
+            return Response({"error": "user_id is required"}, status=400)
+        if not new_password or new_password != confirm_password:
+            return Response({"error": "Passwords do not match"}, status=400)
+        if len(new_password) < 6:
+            return Response({"error": "Password must be at least 6 characters"}, status=400)
+
+        hashed = make_password(new_password)
+        query = "UPDATE user_user SET password = %s WHERE id = %s RETURNING full_name;"
+        with connection.cursor() as cursor:
+            cursor.execute(query, [hashed, user_id])
+            row = cursor.fetchone()
+
+        if not row:
+            return Response({"error": "User not found"}, status=404)
+
+        return Response({
+            "success": True,
+            "message": f"Password for '{row[0]}' has been reset successfully"
+        }, status=200)
+
+
+class ForgotPasswordAPI(APIView):
+    def post(self, request):
+        email = request.data.get('email', '').strip()
+        if not email:
+            return Response({"error": "email is required"}, status=400)
+
+        return Response({"success": True, "message": "Password reset instructions sent."})
+
+
+# ===================== USER STATUS / BLOCK ACCESS ===================== #
+class UserToggleStatusAPI(APIView):
+    """
+    Toggle or explicitly set user active status (block / unblock account).
+    If is_active is false, the user account is disabled and prevented from logging in.
+    """
+    def post(self, request, user_id):
+        is_active = request.data.get("is_active")
+
+        with connection.cursor() as cursor:
+            if is_active is None:
+                # Toggle current status
+                cursor.execute("SELECT is_active, full_name, email FROM user_user WHERE id = %s;", [user_id])
+                row = cursor.fetchone()
+                if not row:
+                    return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+                new_status = not bool(row[0])
+                full_name = row[1]
+            else:
+                if isinstance(is_active, str):
+                    new_status = is_active.lower() in ("true", "1", "active")
+                else:
+                    new_status = bool(is_active)
+
+                cursor.execute("SELECT full_name, email FROM user_user WHERE id = %s;", [user_id])
+                row = cursor.fetchone()
+                if not row:
+                    return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+                full_name = row[0]
+
+            cursor.execute("UPDATE user_user SET is_active = %s WHERE id = %s RETURNING id, is_active;", [new_status, user_id])
+            updated = cursor.fetchone()
+
+        action_word = "activated and login access restored" if new_status else "disabled and login access blocked"
+        return Response({
+            "success": True,
+            "user_id": user_id,
+            "full_name": full_name,
+            "is_active": new_status,
+            "message": f"Account for '{full_name}' has been {action_word}."
+        }, status=status.HTTP_200_OK)
+
+
+# ===================== OTHER UTILITY APIS ===================== #
+class UsersWithPaymentNoProfileAPI(APIView):
+    def get(self, request):
+        query = """
+            SELECT p.user_id, p.amount, p.plan_id, p.status, p.created_at, u.full_name
+            FROM subscriptions_payment p
+            LEFT JOIN "userProfile_userprofile" up ON p.user_id = up.user_id
+            LEFT JOIN user_user u ON p.user_id = u.id
+            WHERE up.id IS NULL
+            ORDER BY p.created_at DESC;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+        users_data = [
+            {
+                "user_id": r[0],
+                "amount": r[1],
+                "plan_id": r[2],
+                "status": r[3],
+                "created_at": r[4].isoformat() if r[4] else None,
+                "user_name": r[5] or f"User #{r[0]}"
+            } for r in rows
+        ]
+        return Response({
+            "count": len(users_data),
+            "total_missing_users": len(set(r[0] for r in rows if r[0])),
+            "users_data": users_data
+        })
+
+
+class SubscribedUsersAPI(APIView):
+    def get(self, request):
+        query = """
+            SELECT u.id, u.full_name, u.email, pl.name as plan_name, s.start_date, s.end_date
+            FROM subscriptions_usersubscription s
+            JOIN user_user u ON s.user_id = u.id
+            JOIN subscriptions_plan pl ON s.plan_id = pl.id
+            WHERE s.is_active = true
+            ORDER BY s.created_at DESC;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+        results = [
+            {
+                "id": r[0],
+                "full_name": r[1],
+                "email": r[2],
+                "plan_name": r[3],
+                "start_date": str(r[4]),
+                "end_date": str(r[5]),
+            } for r in rows
+        ]
+        return Response(results)
+
+
+class UserPlanNotificationAPI(APIView):
+    def get(self, request):
+        return Response({"status": "success", "notifications": []})
+
+
+class DebugSubscriptionsAPI(APIView):
+    def get(self, request):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM subscriptions_usersubscription;")
+            total_subs = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM subscriptions_plan;")
+            total_plans = cursor.fetchone()[0]
+        return Response({"total_subscriptions": total_subs, "total_plans": total_plans})

@@ -16,12 +16,14 @@ from users.views import (
     DebugSubscriptionsAPI,
     AssignedNutritionistAPI,
     AdminLoginAPI,
+    UserToggleStatusAPI,
 )   
 
 urlpatterns = [
     path('auth/login/', AdminLoginAPI.as_view(), name='admin-login'),
     path('create-user', UserListCreateView.as_view(), name='user-create'),
     path("<int:user_id>/", UserDetailView.as_view(), name='user-detail'),
+    path("<int:user_id>/toggle-status/", UserToggleStatusAPI.as_view(), name='user-toggle-status'),
     path("<int:user_id>/health-profile/", UserHealthProfileAPI.as_view(), name='user-health-profile'),
     path("<int:user_id>/assigned-nutritionist/", AssignedNutritionistAPI.as_view(), name='assigned-nutritionist'),
     path("payment-no-profile/", UsersWithPaymentNoProfileAPI.as_view()),

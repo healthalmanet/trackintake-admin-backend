@@ -13,14 +13,25 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-trackintake-admin-secret-k
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 # Dynamic ALLOWED_HOSTS configuration - Strip whitespace from each host
-ALLOWED_HOSTS = [
+ALLOWED_HOSTS = list(set([
     host.strip() for host in 
     os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
     if host.strip()
-]
+] + ['localhost', '127.0.0.1', 'testserver']))
+
+# Completely disable migrations for all custom apps to protect production DB
+MIGRATION_MODULES = {
+    'users': None,
+    'subscription': None,
+    'dashboard': None,
+    'meals': None,
+    'notifications': None,
+    'nutritionist': None,
+}
 
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -39,6 +50,8 @@ INSTALLED_APPS = [
     'notifications',
     'nutritionist',
 ]
+
+ASGI_APPLICATION = 'trackintake_backend.asgi.application'
 
 
 MIDDLEWARE = [
@@ -195,6 +208,28 @@ EMAIL_USE_TLS       = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_HOST_USER     = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL  = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@trackintake.com')
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# ============================================================================
+# CLOUDINARY CONFIGURATION
+# ============================================================================
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+
+CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', 'dkcfeta0f')
+CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', '564813672729478')
+CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', 'LKiQchYbxT1bHUmIGhXkFmzo0Uo')
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET,
+    secure=True
+)
+
 
 # ============================================================================
 # SECURITY CONFIGURATION

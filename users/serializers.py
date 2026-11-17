@@ -1,47 +1,29 @@
 from rest_framework import serializers
-from .models import UserProfile
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    full_name = serializers.CharField(required=True)
+    email = serializers.EmailField(required=True)
+    phone_number = serializers.CharField(allow_null=True, required=False)
+    role = serializers.CharField(default="user")
+    plan = serializers.CharField(allow_null=True, required=False)
+    nutritionist_type = serializers.CharField(allow_null=True, required=False)
+    is_nutritionist_approved = serializers.BooleanField(default=False)
+    is_active = serializers.BooleanField(default=True)
+    is_admin = serializers.BooleanField(default=False)
+    date_joined = serializers.DateTimeField(read_only=True, required=False)
 
-    class Meta:
-        model = UserProfile
-        fields = [
-            "id",
-            "full_name",
-            "email",
-            "role",
-            "is_active",
-            "date_joined"
-        ]
 
+class UserWriteSerializer(serializers.Serializer):
+    full_name = serializers.CharField(required=True)
+    email = serializers.EmailField(required=True)
+    phone_number = serializers.CharField(allow_null=True, required=False)
+    password = serializers.CharField(write_only=True, required=False)
+    role = serializers.CharField(default="user")
+    plan = serializers.CharField(allow_null=True, required=False)
+    is_active = serializers.BooleanField(default=True)
 
-class UserWriteSerializer(serializers.ModelSerializer):
-
-    password = serializers.CharField(write_only=True, required=True)
-
-    class Meta:
-        model = UserProfile
-        fields = [
-            "full_name",
-            "email",
-            "password",
-            "role",
-            "is_active"
-        ]
-
-    def create(self, validated_data):
-        
-        user = UserProfile.objects.create(
-        full_name=validated_data['full_name'],
-        email=validated_data['email'],
-        password=validated_data['password'],
-        role=validated_data['role'],
-        is_active=validated_data.get('is_active', True),
-        is_admin=False  
-    )
-        return user
-    
 
 class AssignNutritionistSerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
