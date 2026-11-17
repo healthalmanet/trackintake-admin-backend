@@ -1,60 +1,37 @@
+from django.db import connection
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-from nutritionist.models import NutritionistProfile
 
 
 class ApproveNutritionistAPIView(APIView):
-
-    @swagger_auto_schema(
-        operation_summary="Approve Nutritionist",
-        operation_description="Approve a nutritionist by setting is_verified=True",
-        request_body=None,
-        manual_parameters=[
-            openapi.Parameter(
-                name='pk',
-                in_=openapi.IN_PATH,
-                description="Nutritionist ID",
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: openapi.Response(
-                description="Nutritionist approved successfully"
-            ),
-            404: openapi.Response(
-                description="Nutritionist not found"
-            )
-        }
-    )
     def post(self, request, pk):
+        is_verified_param = request.data.get("is_verified") if isinstance(request.data, dict) else None
 
-        try:
-            nutritionist = NutritionistProfile.objects.get(id=pk)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id, is_verified FROM nutritionist_nutritionistprofile WHERE id = %s;", [pk])
+            row = cursor.fetchone()
 
-        except NutritionistProfile.DoesNotExist:
-            return Response(
-                {
-                    "success": False,
-                    "message": "Nutritionist not found"
-                },
-                status=status.HTTP_404_NOT_FOUND
+            if not row:
+                return Response(
+                    {"success": False, "message": "Nutritionist not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            current_status = bool(row[1])
+            new_status = bool(is_verified_param) if is_verified_param is not None else not current_status
+
+            cursor.execute(
+                "UPDATE nutritionist_nutritionistprofile SET is_verified = %s WHERE id = %s RETURNING id, is_verified;",
+                [new_status, pk]
             )
+            updated = cursor.fetchone()
 
-        nutritionist.is_verified = True
-        nutritionist.save()
-
-        return Response(
-            {
-                "success": True,
-                "message": "Nutritionist approved successfully",
-                "data": {
-                    "nutritionist_id": nutritionist.id,
-                    "is_verified": nutritionist.is_verified
-                }
-            },
-            status=status.HTTP_200_OK
-        )
+        return Response({
+            "success": True,
+            "message": "Nutritionist approved successfully",
+            "data": {
+                "nutritionist_id": updated[0],
+                "is_verified": updated[1]
+            }
+        }, status=status.HTTP_200_OK)

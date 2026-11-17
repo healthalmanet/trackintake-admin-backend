@@ -1,15 +1,21 @@
 from datetime import date
-from .models import UserSubscription, SubscriptionPlan
+from django.db import connection
 
 
 def get_user_plan_and_upgrade(user_id):
-    
-    subscription = UserSubscription.objects.filter(
-        user_id=user_id,
-        is_active=True
-    ).first()
+    query = """
+        SELECT s.id, s.end_date, pl.name
+        FROM subscriptions_usersubscription s
+        LEFT JOIN subscriptions_plan pl ON s.plan_id = pl.id
+        WHERE s.user_id = %s AND s.is_active = true
+        ORDER BY s.created_at DESC
+        LIMIT 1;
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(query, [user_id])
+        row = cursor.fetchone()
 
-    if not subscription:
+    if not row:
         return {
             "plan": "free",
             "upgrade": {
@@ -18,10 +24,8 @@ def get_user_plan_and_upgrade(user_id):
             }
         }
 
-    if subscription.end_date and subscription.end_date < date.today():
-        subscription.is_active = False
-        subscription.save()
-
+    sub_id, end_date, plan_name = row
+    if end_date and end_date < date.today():
         return {
             "plan": "free",
             "upgrade": {
@@ -30,24 +34,11 @@ def get_user_plan_and_upgrade(user_id):
             }
         }
 
-    plan = SubscriptionPlan.objects.filter(id=subscription.plan_id).first()
-    plan_name = plan.name.lower() if plan else "free"
-
-    upgrade = None
-
-    if plan_name == "basic":
-        upgrade = {
-            "show": True,
-            "message": "Upgrade to Pro 🚀"
-        }
-
-    elif plan_name == "pro":
-        upgrade = {
-            "show": False,
-            "message": None
-        }
-
+    pname = (plan_name or "free").lower()
     return {
-        "plan": plan_name,
-        "upgrade": upgrade
+        "plan": pname,
+        "upgrade": {
+            "show": pname == "basic",
+            "message": "Upgrade to Pro 🚀" if pname == "basic" else None
+        }
     }
