@@ -1,10 +1,12 @@
 from django.urls import path
-from .views import DietRecommendationAPIView, DietRecommendationDetailAPI, MealListCreateAPI, MealDetailAPI, DietStatsAPIView
+from .views import DietRecommendationAPIView, DietRecommendationDetailAPI, MealListCreateAPI, MealDetailAPI
+from .food_views import FoodItemListAPI
 
 
 urlpatterns = [
 
     path("meals/", MealListCreateAPI.as_view()),
+    path("food-items/", FoodItemListAPI.as_view()),
 
     path("meals/<int:pk>/", MealDetailAPI.as_view()),
     path("diet-recommendations/",
@@ -12,8 +14,5 @@ urlpatterns = [
         name='diet-recommendations'),
     path("diet-recommendations/<int:pk>/",
         DietRecommendationDetailAPI.as_view(),
-        name='diet-recommendations-detail'),
-    path("diet-recommendations/stats/",
-        DietStatsAPIView.as_view(),
-        name='diet-recommendations-stats'),
+        name='diet-recommendations-detail')
 ]
