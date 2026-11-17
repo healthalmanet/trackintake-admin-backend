@@ -3,6 +3,8 @@ from django.db import connection
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
 
 
 class MealListCreateAPI(APIView):
@@ -251,33 +253,32 @@ class DietStatsAPIView(APIView):
     )
     def get(self, request):
         try:
-            from django.db.models import Count, Q
-            
-            # Single database query to get all stats
-            stats = DietRecommendation.objects.filter(
-                is_deleted=False
-            ).aggregate(
-                total=Count('id'),
-                approved=Count('id', filter=Q(status__iexact='approved')),
-                pending=Count('id', filter=Q(status__iexact='pending')),
-                failed=Count('id', filter=Q(status__iexact='failed')),
-                rejected=Count('id', filter=Q(status__iexact='rejected')),
-            )
+            query = """
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE LOWER(status) = 'approved') as approved,
+                    COUNT(*) FILTER (WHERE LOWER(status) = 'pending') as pending,
+                    COUNT(*) FILTER (WHERE LOWER(status) = 'failed') as failed,
+                    COUNT(*) FILTER (WHERE LOWER(status) = 'rejected') as rejected
+                FROM diet_dietrecommendation
+                WHERE is_deleted = false;
+            """
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                row = cursor.fetchone() or (0, 0, 0, 0, 0)
             
             return Response({
                 "success": True,
                 "data": {
-                    "total": stats['total'],
-                    "approved": stats['approved'],
-                    "pending": stats['pending'],
-                    "failed": stats['failed'],
-                    "rejected": stats['rejected'],
+                    "total": row[0] or 0,
+                    "approved": row[1] or 0,
+                    "pending": row[2] or 0,
+                    "failed": row[3] or 0,
+                    "rejected": row[4] or 0,
                 }
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
-            import traceback
-            print("DIET STATS ERROR:", traceback.format_exc())
             return Response({
                 "error": str(e),
                 "message": "Error fetching diet stats"
