@@ -48,6 +48,17 @@ class AdminNotificationAPI(APIView):
 
     def get(self, request):
         notif_type = request.query_params.get('type', 'admin')
+        gen_test = request.query_params.get('generate_test', '').lower() in ['true', '1', 'yes']
+
+        # Automatically detect and generate events from live database tables
+        # (newly registered nutritionists, booked appointments, cancelled appointments, plan purchases)
+        try:
+            from .utils import sync_database_events_to_notifications, generate_all_test_events
+            sync_database_events_to_notifications()
+            if gen_test:
+                generate_all_test_events()
+        except Exception as e:
+            print(f"[Auto Sync DB Events Error]: {e}")
 
         query = """
             SELECT id, user_id, message, type, is_read, created_at
@@ -68,6 +79,38 @@ class AdminNotificationAPI(APIView):
             "unread_count": unread_count,
             "notifications": notifications
         })
+
+    def post(self, request):
+        """
+        Explicitly triggers auto-sync from database and/or generates test events in one API call.
+        """
+        from .utils import sync_database_events_to_notifications, generate_all_test_events
+        gen_test = request.data.get('generate_test', False) or request.query_params.get('generate_test', '').lower() in ['true', '1', 'yes']
+
+        synced = sync_database_events_to_notifications(limit_per_category=10)
+        test_results = generate_all_test_events() if gen_test else {}
+
+        query = """
+            SELECT id, user_id, message, type, is_read, created_at
+            FROM user_notifications
+            WHERE type = 'admin'
+            ORDER BY created_at DESC;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+        notifications = [parse_notification(r) for r in rows]
+        unread_count = sum(1 for n in notifications if not n["is_read"])
+
+        return Response({
+            "success": True,
+            "synced_from_db": synced,
+            "test_events_generated": test_results,
+            "total": len(notifications),
+            "unread_count": unread_count,
+            "notifications": notifications
+        }, status=status.HTTP_200_OK)
 
 
 class MarkNotificationReadAPI(APIView):
@@ -124,6 +167,16 @@ class TriggerNotificationEventAPI(APIView):
 
         event = request.data.get("event", "nutritionist_registered").lower().strip()
         data = request.data.get("data", {}) or request.data
+
+        if event in ["all", "generate_all", "all_events"]:
+            from .utils import generate_all_test_events
+            results = generate_all_test_events()
+            return Response({
+                "success": True,
+                "event": "all",
+                "generated": results,
+                "message": "All test events generated and saved to DB successfully for admin retrieval."
+            }, status=status.HTTP_201_CREATED)
 
         notif_id = None
         event_name = event
