@@ -49,7 +49,7 @@ def _clean_dr_name(name):
     return n if n.startswith("Dr.") else f"Dr. {n}"
 
 
-# 1. NEW NUTRITIONIST REGISTRATION
+# 1. NEW NUTRITIONIST & PATIENT REGISTRATIONS
 def notify_nutritionist_registered(user_id, full_name, email="", nutritionist_type="inhouse"):
     """
     Alerts admin when a new clinical nutritionist or specialist registers.
@@ -72,14 +72,38 @@ def notify_nutritionist_registered(user_id, full_name, email="", nutritionist_ty
     )
 
 
-# 2. PLAN PURCHASED & FAILED PAYMENTS
-def notify_plan_purchased(user_id, user_name, plan_name, amount, payment_id=""):
+def notify_patient_registered(user_id, full_name, email="", phone=""):
     """
-    Alerts admin when a patient successfully purchases a subscription plan.
+    Alerts admin when a new patient registers an account.
     """
+    p_name = full_name or f"Patient #{user_id}"
+    contact = f" ({email})" if email else (f" ({phone})" if phone else "")
     return create_notification(
-        title="Subscription Plan Purchased",
-        message=f"{user_name} purchased {plan_name} for ₹{amount} (Payment ID: #{payment_id}).",
+        title="New Patient Registration",
+        message=f"Patient {p_name}{contact} registered a new patient account.",
+        notification_type='admin',
+        user_id=user_id,
+        category="Registration",
+        metadata={
+            "action": "view_user",
+            "page": "users",
+            "user_id": user_id,
+            "full_name": full_name
+        }
+    )
+
+
+# 2. PLAN PURCHASED & FAILED PAYMENTS
+def notify_plan_purchased(user_id, user_name, plan_name, amount, payment_id="", user_role="user"):
+    """
+    Alerts admin when a patient or nutritionist successfully purchases a subscription plan.
+    """
+    is_nutri = str(user_role).lower() == "nutritionist"
+    role_label = "Nutritionist" if is_nutri else "Patient"
+    display_name = _clean_dr_name(user_name) if is_nutri else user_name
+    return create_notification(
+        title=f"{role_label} Plan Purchased",
+        message=f"{role_label} {display_name} purchased {plan_name} for ₹{amount} (Payment ID: #{payment_id}).",
         notification_type='admin',
         user_id=user_id,
         category="Plan Purchase",
@@ -89,7 +113,8 @@ def notify_plan_purchased(user_id, user_name, plan_name, amount, payment_id=""):
             "user_id": user_id,
             "plan_name": plan_name,
             "amount": amount,
-            "payment_id": payment_id
+            "payment_id": payment_id,
+            "role": user_role
         }
     )
 
@@ -214,6 +239,7 @@ def sync_database_events_to_notifications(limit_per_category=5):
     """
     synced_counts = {
         "nutritionists": 0,
+        "patients": 0,
         "appointments_booked": 0,
         "appointments_cancelled": 0,
         "payments": 0
@@ -253,7 +279,41 @@ def sync_database_events_to_notifications(limit_per_category=5):
     except Exception as e:
         print(f"[Sync Nutritionists Error]: {e}")
 
-    # 2. Booked Appointments (appointments_appointment where status != 'CANCELLED')
+    # 2. Newly Registered Patients (user_user where role = 'user')
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT u.id, u.full_name, u.email, u.phone_number, u.date_joined
+                FROM user_user u
+                WHERE u.role = 'user'
+                  AND u.date_joined >= NOW() - INTERVAL '30 days'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_notifications un
+                      WHERE un.type = 'admin'
+                        AND (
+                            un.user_id = u.id
+                            OR (u.email IS NOT NULL AND u.email != '' AND un.message ILIKE '%%' || u.email || '%%')
+                            OR (u.full_name IS NOT NULL AND u.full_name != '' AND un.message ILIKE '%%' || u.full_name || '%%' AND un.message ILIKE '%%patient account%%')
+                        )
+                  )
+                ORDER BY u.id DESC
+                LIMIT %s;
+            """, [limit_per_category])
+            rows = cursor.fetchall()
+            for r in rows:
+                uid, name, email, phone, djoined = r
+                nid = notify_patient_registered(
+                    user_id=uid,
+                    full_name=name or f"Patient #{uid}",
+                    email=email or "",
+                    phone=phone or ""
+                )
+                if nid:
+                    synced_counts["patients"] += 1
+    except Exception as e:
+        print(f"[Sync Patients Error]: {e}")
+
+    # 3. Booked Appointments (appointments_appointment where status != 'CANCELLED')
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -291,7 +351,7 @@ def sync_database_events_to_notifications(limit_per_category=5):
     except Exception as e:
         print(f"[Sync Booked Appointments Error]: {e}")
 
-    # 3. Cancelled Appointments (appointments_appointment where status = 'CANCELLED')
+    # 4. Cancelled Appointments (appointments_appointment where status = 'CANCELLED')
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -327,12 +387,12 @@ def sync_database_events_to_notifications(limit_per_category=5):
     except Exception as e:
         print(f"[Sync Cancelled Appointments Error]: {e}")
 
-    # 4. Plan Purchases (subscriptions_payment where status = 'SUCCESS' or 'CAPTURED')
+    # 5. Plan Purchases (subscriptions_payment where status = 'SUCCESS' or 'CAPTURED')
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT p.id, p.user_id, COALESCE(u.full_name, 'User #' || p.user_id) as user_name,
-                       p.amount, p.razorpay_payment_id, p.created_at
+                       p.amount, p.razorpay_payment_id, p.created_at, COALESCE(u.role, 'user') as user_role
                 FROM subscriptions_payment p
                 LEFT JOIN user_user u ON p.user_id = u.id
                 WHERE UPPER(p.status) IN ('SUCCESS', 'CAPTURED', 'PAID')
@@ -350,13 +410,14 @@ def sync_database_events_to_notifications(limit_per_category=5):
             """, [limit_per_category])
             rows = cursor.fetchall()
             for r in rows:
-                pid, uid, uname, amt, pay_id, cat = r
+                pid, uid, uname, amt, pay_id, cat, urole = r
                 notif_id = notify_plan_purchased(
                     user_id=uid,
                     user_name=uname,
                     plan_name="Subscription Plan",
                     amount=int(amt or 0),
-                    payment_id=pay_id or str(pid)
+                    payment_id=pay_id or str(pid),
+                    user_role=urole
                 )
                 if notif_id:
                     synced_counts["payments"] += 1
