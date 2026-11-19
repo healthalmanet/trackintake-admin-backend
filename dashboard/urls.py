@@ -17,12 +17,13 @@ from .blog_views import BlogListCreateAPI, BlogDetailAPI, BlogImageUploadAPI
 from .progress_views import ProgressLogsAPI
 from .payables_views import PayablesListAPI, PayableDetailUpdateAPI
 from .approvals_views import ApprovalsListAPI, ApprovalActionAPI
-from .settings_views import InhousePricingSettingsAPI
+from .settings_views import InhousePricingSettingsAPI, PractitionerPricingUpdateAPI
 from .assignment_views import PatientAssignmentListAPI, BatchAssignPatientsAPI, UnassignPatientAPI
 
 urlpatterns = [
     path("overview/", DashboardOverviewAPI.as_view()),
     path("settings/inhouse-pricing/", InhousePricingSettingsAPI.as_view(), name="settings-inhouse-pricing"),
+    path("settings/practitioner/<int:pk>/", PractitionerPricingUpdateAPI.as_view(), name="settings-practitioner-pricing"),
     path("assignments/", PatientAssignmentListAPI.as_view(), name="assignments-list"),
     path("assignments/batch-assign/", BatchAssignPatientsAPI.as_view(), name="assignments-batch-assign"),
     path("assignments/unassign/", UnassignPatientAPI.as_view(), name="assignments-unassign"),

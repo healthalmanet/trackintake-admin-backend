@@ -100,7 +100,9 @@ class PayablesListAPI(APIView):
                         p.id as patient_id, COALESCE(p.full_name, 'Patient') as patient_name,
                         COALESCE(p.email, '') as patient_email, COALESCE(p.phone_number, '') as patient_phone,
                         n.id as nutri_id, COALESCE(n.full_name, 'Nutritionist') as nutri_name,
-                        COALESCE(n.email, '') as nutri_email, COALESCE(n.phone_number, '') as nutri_phone
+                        COALESCE(n.email, '') as nutri_email, COALESCE(n.phone_number, '') as nutri_phone,
+                        COALESCE(a.commission_rate, 5.00) as commission_rate,
+                        COALESCE(a.commission_amount, 0.00) as commission_amount
                     FROM appointments_appointment a
                     LEFT JOIN user_user p ON a.patient_id = p.id
                     LEFT JOIN user_user n ON a.nutritionist_id = n.id
@@ -113,6 +115,16 @@ class PayablesListAPI(APIView):
 
             results = []
             for r in rows:
+                fee = float(r[6])
+                payout = float(r[9])
+                comm_rate = float(r[26]) if len(r) > 26 and r[26] is not None else 5.0
+                comm_amount = float(r[27]) if len(r) > 27 and r[27] is not None else 0.0
+                if comm_amount <= 0 and fee > 0 and payout > 0 and fee > payout:
+                    comm_amount = round(fee - payout, 2)
+                elif comm_amount <= 0 and fee > 0 and payout == fee:
+                    comm_amount = round(fee * (comm_rate / 100.0), 2)
+                    payout = max(0.0, round(fee - comm_amount, 2))
+
                 results.append({
                     "id": r[0],
                     "slot_date": str(r[1]) if r[1] else None,
@@ -120,10 +132,12 @@ class PayablesListAPI(APIView):
                     "appointment_category": r[3] or "IN_HOUSE",
                     "appointment_type": r[4] or "VIRTUAL",
                     "status": r[5] or "CONFIRMED",
-                    "fee_amount": float(r[6]),
+                    "fee_amount": fee,
                     "payment_status": r[7] or "UNPAID",
                     "payout_status": r[8],
-                    "payout_amount": float(r[9]),
+                    "payout_amount": payout,
+                    "commission_rate": comm_rate,
+                    "commission_amount": comm_amount,
                     "payout_transaction_ref": r[10] or "",
                     "payout_marked_at": r[11].isoformat() if r[11] else None,
                     "refund_amount": float(r[12]),
