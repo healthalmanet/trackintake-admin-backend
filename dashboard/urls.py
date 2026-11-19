@@ -15,19 +15,22 @@ from .views import (
 from .appointment_views import AppointmentListAPI, AppointmentDetailAPI
 from .blog_views import BlogListCreateAPI, BlogDetailAPI, BlogImageUploadAPI
 from .progress_views import ProgressLogsAPI
-from .payables_views import PayablesListAPI, PayableDetailUpdateAPI
+from .payables_views import PayablesListAPI, PayableDetailUpdateAPI, NutritionistPayablesHistoryAPI, BulkPayableActionAPI
 from .approvals_views import ApprovalsListAPI, ApprovalActionAPI
-from .settings_views import InhousePricingSettingsAPI
+from .settings_views import InhousePricingSettingsAPI, PractitionerPricingUpdateAPI
 from .assignment_views import PatientAssignmentListAPI, BatchAssignPatientsAPI, UnassignPatientAPI
 
 urlpatterns = [
     path("overview/", DashboardOverviewAPI.as_view()),
     path("settings/inhouse-pricing/", InhousePricingSettingsAPI.as_view(), name="settings-inhouse-pricing"),
+    path("settings/practitioner/<int:pk>/", PractitionerPricingUpdateAPI.as_view(), name="settings-practitioner-pricing"),
     path("assignments/", PatientAssignmentListAPI.as_view(), name="assignments-list"),
     path("assignments/batch-assign/", BatchAssignPatientsAPI.as_view(), name="assignments-batch-assign"),
     path("assignments/unassign/", UnassignPatientAPI.as_view(), name="assignments-unassign"),
     path("payables/", PayablesListAPI.as_view()),
     path("payables/<int:pk>/", PayableDetailUpdateAPI.as_view()),
+    path("payables/nutritionist/<int:nutri_id>/", NutritionistPayablesHistoryAPI.as_view()),
+    path("payables/bulk-action/", BulkPayableActionAPI.as_view()),
     path("approvals/", ApprovalsListAPI.as_view()),
     path("approvals/<int:pk>/", ApprovalActionAPI.as_view()),
     path("total-users/", TotalUsersAPI.as_view()),

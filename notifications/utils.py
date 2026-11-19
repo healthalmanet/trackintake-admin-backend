@@ -49,7 +49,7 @@ def _clean_dr_name(name):
     return n if n.startswith("Dr.") else f"Dr. {n}"
 
 
-# 1. NEW NUTRITIONIST REGISTRATION
+# 1. NEW NUTRITIONIST & PATIENT REGISTRATIONS
 def notify_nutritionist_registered(user_id, full_name, email="", nutritionist_type="inhouse"):
     """
     Alerts admin when a new clinical nutritionist or specialist registers.
@@ -72,14 +72,38 @@ def notify_nutritionist_registered(user_id, full_name, email="", nutritionist_ty
     )
 
 
-# 2. PLAN PURCHASED & FAILED PAYMENTS
-def notify_plan_purchased(user_id, user_name, plan_name, amount, payment_id=""):
+def notify_patient_registered(user_id, full_name, email="", phone=""):
     """
-    Alerts admin when a patient successfully purchases a subscription plan.
+    Alerts admin when a new patient registers an account.
     """
+    p_name = full_name or f"Patient #{user_id}"
+    contact = f" ({email})" if email else (f" ({phone})" if phone else "")
     return create_notification(
-        title="Subscription Plan Purchased",
-        message=f"{user_name} purchased {plan_name} for ₹{amount} (Payment ID: #{payment_id}).",
+        title="New Patient Registration",
+        message=f"Patient {p_name}{contact} registered a new patient account.",
+        notification_type='admin',
+        user_id=user_id,
+        category="Registration",
+        metadata={
+            "action": "view_user",
+            "page": "users",
+            "user_id": user_id,
+            "full_name": full_name
+        }
+    )
+
+
+# 2. PLAN PURCHASED & FAILED PAYMENTS
+def notify_plan_purchased(user_id, user_name, plan_name, amount, payment_id="", user_role="user"):
+    """
+    Alerts admin when a patient or nutritionist successfully purchases a subscription plan.
+    """
+    is_nutri = str(user_role).lower() == "nutritionist"
+    role_label = "Nutritionist" if is_nutri else "Patient"
+    display_name = _clean_dr_name(user_name) if is_nutri else user_name
+    return create_notification(
+        title=f"{role_label} Plan Purchased",
+        message=f"{role_label} {display_name} purchased {plan_name} for ₹{amount} (Payment ID: #{payment_id}).",
         notification_type='admin',
         user_id=user_id,
         category="Plan Purchase",
@@ -89,7 +113,8 @@ def notify_plan_purchased(user_id, user_name, plan_name, amount, payment_id=""):
             "user_id": user_id,
             "plan_name": plan_name,
             "amount": amount,
-            "payment_id": payment_id
+            "payment_id": payment_id,
+            "role": user_role
         }
     )
 
@@ -119,12 +144,12 @@ def notify_appointment_booked(appointment_id, patient_name, nutritionist_name, s
     """
     Alerts admin when a new appointment booking is created.
     """
-    mode_text = "Virtual Video Session" if appt_type.upper() == "VIRTUAL" else "In-Clinic Consultation"
+    mode_text = "Virtual Video Session" if str(appt_type).upper() == "VIRTUAL" else "In-Clinic Consultation"
     time_text = f" at {slot_time}" if slot_time else ""
     doc_name = _clean_dr_name(nutritionist_name)
     return create_notification(
         title="New Appointment Booked",
-        message=f"{patient_name} booked a {mode_text} with {doc_name} on {slot_date}{time_text} (Fee: ₹{fee}).",
+        message=f"Consultation #{appointment_id}: {patient_name} booked a {mode_text} with {doc_name} on {slot_date}{time_text} (Fee: ₹{fee}).",
         notification_type='admin',
         category="Appointment",
         metadata={
@@ -203,3 +228,253 @@ def create_assignment_notification(user_name, nutritionist_name, specialization=
         notification_type='admin',
         category="Assignment"
     )
+
+
+# 4. AUTO-DETECTION & SYNC FROM LIVE DATABASE TABLES
+def sync_database_events_to_notifications(limit_per_category=5):
+    """
+    Automatically detects new registrations, appointments (booked/cancelled),
+    and subscription payments from the database tables and generates
+    corresponding admin notifications in user_notifications if not already present.
+    """
+    synced_counts = {
+        "nutritionists": 0,
+        "patients": 0,
+        "appointments_booked": 0,
+        "appointments_cancelled": 0,
+        "payments": 0
+    }
+
+    # 1. Newly Registered Nutritionists (user_user where role = 'nutritionist')
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT u.id, u.full_name, u.email, u.nutritionist_type, u.date_joined
+                FROM user_user u
+                WHERE u.role = 'nutritionist'
+                  AND u.date_joined >= NOW() - INTERVAL '30 days'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_notifications un
+                      WHERE un.type = 'admin'
+                        AND (
+                            un.user_id = u.id
+                            OR (u.email IS NOT NULL AND u.email != '' AND un.message ILIKE '%%' || u.email || '%%')
+                            OR (u.full_name IS NOT NULL AND u.full_name != '' AND un.message ILIKE '%%' || u.full_name || '%%' AND un.message ILIKE '%%register%%')
+                        )
+                  )
+                ORDER BY u.id DESC
+                LIMIT %s;
+            """, [limit_per_category])
+            rows = cursor.fetchall()
+            for r in rows:
+                uid, name, email, ntype, djoined = r
+                nid = notify_nutritionist_registered(
+                    user_id=uid,
+                    full_name=name or f"Nutritionist #{uid}",
+                    email=email or "",
+                    nutritionist_type=ntype or "inhouse"
+                )
+                if nid:
+                    synced_counts["nutritionists"] += 1
+    except Exception as e:
+        print(f"[Sync Nutritionists Error]: {e}")
+
+    # 2. Newly Registered Patients (user_user where role = 'user')
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT u.id, u.full_name, u.email, u.phone_number, u.date_joined
+                FROM user_user u
+                WHERE u.role = 'user'
+                  AND u.date_joined >= NOW() - INTERVAL '30 days'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_notifications un
+                      WHERE un.type = 'admin'
+                        AND (
+                            un.user_id = u.id
+                            OR (u.email IS NOT NULL AND u.email != '' AND un.message ILIKE '%%' || u.email || '%%')
+                            OR (u.full_name IS NOT NULL AND u.full_name != '' AND un.message ILIKE '%%' || u.full_name || '%%' AND un.message ILIKE '%%patient account%%')
+                        )
+                  )
+                ORDER BY u.id DESC
+                LIMIT %s;
+            """, [limit_per_category])
+            rows = cursor.fetchall()
+            for r in rows:
+                uid, name, email, phone, djoined = r
+                nid = notify_patient_registered(
+                    user_id=uid,
+                    full_name=name or f"Patient #{uid}",
+                    email=email or "",
+                    phone=phone or ""
+                )
+                if nid:
+                    synced_counts["patients"] += 1
+    except Exception as e:
+        print(f"[Sync Patients Error]: {e}")
+
+    # 3. Booked Appointments (appointments_appointment where status != 'CANCELLED')
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT a.id, a.patient_id, COALESCE(p.full_name, 'Patient #' || a.patient_id) as patient_name,
+                       a.nutritionist_id, COALESCE(n.full_name, 'Practitioner #' || a.nutritionist_id) as nutritionist_name,
+                       a.slot_date, a.slot_start_time, a.fee_amount, a.appointment_type, a.created_at
+                FROM appointments_appointment a
+                LEFT JOIN user_user p ON a.patient_id = p.id
+                LEFT JOIN user_user n ON a.nutritionist_id = n.id
+                WHERE (a.status IS NULL OR UPPER(a.status) NOT IN ('CANCELLED', 'CANCELED'))
+                  AND a.created_at >= NOW() - INTERVAL '30 days'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_notifications un
+                      WHERE un.type = 'admin'
+                        AND un.message LIKE '%%#' || a.id || '%%'
+                        AND (un.message ILIKE '%%booked%%' OR un.message ILIKE '%%Appointment Booked%%')
+                  )
+                ORDER BY a.id DESC
+                LIMIT %s;
+            """, [limit_per_category])
+            rows = cursor.fetchall()
+            for r in rows:
+                aid, pid, pname, nid, nname, sdate, stime, fee, atype, cat = r
+                notif_id = notify_appointment_booked(
+                    appointment_id=aid,
+                    patient_name=pname,
+                    nutritionist_name=nname,
+                    slot_date=sdate or "Upcoming",
+                    slot_time=str(stime) if stime else "",
+                    fee=int(fee or 0),
+                    appt_type=atype or "VIRTUAL"
+                )
+                if notif_id:
+                    synced_counts["appointments_booked"] += 1
+    except Exception as e:
+        print(f"[Sync Booked Appointments Error]: {e}")
+
+    # 4. Cancelled Appointments (appointments_appointment where status = 'CANCELLED')
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT a.id, a.patient_id, COALESCE(p.full_name, 'Patient #' || a.patient_id) as patient_name,
+                       a.nutritionist_id, COALESCE(n.full_name, 'Practitioner #' || a.nutritionist_id) as nutritionist_name,
+                       a.cancellation_reason, a.cancelled_by, a.cancelled_at
+                FROM appointments_appointment a
+                LEFT JOIN user_user p ON a.patient_id = p.id
+                LEFT JOIN user_user n ON a.nutritionist_id = n.id
+                WHERE UPPER(a.status) IN ('CANCELLED', 'CANCELED')
+                  AND (a.cancelled_at IS NULL OR a.cancelled_at >= NOW() - INTERVAL '30 days' OR a.created_at >= NOW() - INTERVAL '30 days')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_notifications un
+                      WHERE un.type = 'admin'
+                        AND un.message LIKE '%%#' || a.id || '%%'
+                        AND (un.message ILIKE '%%cancel%%' OR un.message ILIKE '%%Cancelled%%')
+                  )
+                ORDER BY a.id DESC
+                LIMIT %s;
+            """, [limit_per_category])
+            rows = cursor.fetchall()
+            for r in rows:
+                aid, pid, pname, nid, nname, reason, cby, cat = r
+                notif_id = notify_appointment_cancelled(
+                    appointment_id=aid,
+                    patient_name=pname,
+                    nutritionist_name=nname,
+                    reason=reason or "Cancellation requested",
+                    cancelled_by=cby or "Patient"
+                )
+                if notif_id:
+                    synced_counts["appointments_cancelled"] += 1
+    except Exception as e:
+        print(f"[Sync Cancelled Appointments Error]: {e}")
+
+    # 5. Plan Purchases (subscriptions_payment where status = 'SUCCESS' or 'CAPTURED')
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT p.id, p.user_id, COALESCE(u.full_name, 'User #' || p.user_id) as user_name,
+                       p.amount, p.razorpay_payment_id, p.created_at, COALESCE(u.role, 'user') as user_role
+                FROM subscriptions_payment p
+                LEFT JOIN user_user u ON p.user_id = u.id
+                WHERE UPPER(p.status) IN ('SUCCESS', 'CAPTURED', 'PAID')
+                  AND p.created_at >= NOW() - INTERVAL '30 days'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_notifications un
+                      WHERE un.type = 'admin'
+                        AND (
+                            (p.razorpay_payment_id IS NOT NULL AND p.razorpay_payment_id != '' AND un.message LIKE '%%' || p.razorpay_payment_id || '%%')
+                            OR un.message LIKE '%%Payment ID: #' || p.id || '%%'
+                        )
+                  )
+                ORDER BY p.id DESC
+                LIMIT %s;
+            """, [limit_per_category])
+            rows = cursor.fetchall()
+            for r in rows:
+                pid, uid, uname, amt, pay_id, cat, urole = r
+                notif_id = notify_plan_purchased(
+                    user_id=uid,
+                    user_name=uname,
+                    plan_name="Subscription Plan",
+                    amount=int(amt or 0),
+                    payment_id=pay_id or str(pid),
+                    user_role=urole
+                )
+                if notif_id:
+                    synced_counts["payments"] += 1
+    except Exception as e:
+        print(f"[Sync Payments Error]: {e}")
+
+    return synced_counts
+
+
+# 5. GENERATE ALL TEST EVENTS
+def generate_all_test_events():
+    """
+    Generates a full suite of test events (nutritionist, booking, cancellation, purchase, payment failure, booking failure)
+    for simulation and instant verification.
+    """
+    ts = int(datetime.now(timezone.utc).timestamp()) % 100000
+    results = {}
+    results["nutritionist"] = notify_nutritionist_registered(
+        user_id=None,
+        full_name="Dr. Pooja Deshmukh",
+        email=f"dr.pooja_{ts}@example.com",
+        nutritionist_type="expert"
+    )
+    results["appointment_booked"] = notify_appointment_booked(
+        appointment_id=400 + (ts % 500),
+        patient_name="Sameer Verma",
+        nutritionist_name="Dr. Rohit Mathur",
+        slot_date="2026-11-20",
+        slot_time="10:30 AM",
+        fee=799,
+        appt_type="VIRTUAL"
+    )
+    results["appointment_cancelled"] = notify_appointment_cancelled(
+        appointment_id=400 + (ts % 500),
+        patient_name="Sameer Verma",
+        nutritionist_name="Dr. Rohit Mathur",
+        reason="Patient emergency rescheduling request",
+        cancelled_by="Patient"
+    )
+    results["plan_purchased"] = notify_plan_purchased(
+        user_id=None,
+        user_name="Arjun Kapoor",
+        plan_name="Pro Transformation Plan (6 Months)",
+        amount=2999,
+        payment_id=f"pay_live_{ts}"
+    )
+    results["payment_failed"] = notify_payment_failed(
+        user_id=None,
+        user_name="Priya Sen",
+        plan_name="Elite Nutrition Plan",
+        amount=1999,
+        error_reason="Card limit exceeded / Insufficient funds"
+    )
+    results["appointment_failed"] = notify_appointment_failed(
+        patient_name="Kavita Rao",
+        reason="Selected timeslot already locked by another user",
+        nutritionist_name="Dr. Ananya Roy"
+    )
+    return results
+
