@@ -101,7 +101,8 @@ class ApprovalsListAPI(APIView):
                         np.profile_photo,
                         hp.city, hp.country,
                         (SELECT COUNT(*) FROM nutritionist_patientassignment WHERE nutritionist_id = u.id) as assigned_patients_count,
-                        (SELECT COUNT(*) FROM appointments_appointment WHERE nutritionist_id = u.id) as total_appointments_count
+                        (SELECT COUNT(*) FROM appointments_appointment WHERE nutritionist_id = u.id) as total_appointments_count,
+                        hp.gender, hp.date_of_birth, hp.height_cm, hp.weight_kg, hp.diet_type, hp.activity_level, hp.goal
                     FROM nutritionist_nutritionistprofile np
                     JOIN user_user u ON np.user_id = u.id
                     LEFT JOIN "userProfile_userprofile" hp ON u.id = hp.user_id
@@ -111,6 +112,75 @@ class ApprovalsListAPI(APIView):
                 """, params + [page_size, offset])
 
                 rows = cursor.fetchall()
+
+                # Batch fetch subscriptions & payments for these users
+                user_ids = [r[1] for r in rows]
+                subscriptions_by_user = {}
+                payments_by_user = {}
+
+                if user_ids:
+                    placeholders = ','.join(['%s'] * len(user_ids))
+                    cursor.execute(f"""
+                        SELECT s.user_id, s.id, s.start_date, s.end_date, s.remaining_inhouse, s.remaining_expert,
+                               s.is_active, p.id as plan_id, COALESCE(p.name, 'Subscription Plan') as plan_name,
+                               COALESCE(p.price, 0) as price, s.created_at, p.plan_type, p.duration_days,
+                               p.nutri_max_patients, p.nutri_ai_diet_allowed, p.nutri_manual_diet_allowed,
+                               p.nutri_chat_allowed, p.nutri_online_appointment_allowed, p.nutri_offline_appointment_allowed
+                        FROM subscriptions_usersubscription s
+                        LEFT JOIN subscriptions_plan p ON s.plan_id = p.id
+                        WHERE s.user_id IN ({placeholders})
+                        ORDER BY s.is_active DESC, s.created_at DESC;
+                    """, user_ids)
+                    for sub_row in cursor.fetchall():
+                        uid = sub_row[0]
+                        if uid not in subscriptions_by_user:
+                            subscriptions_by_user[uid] = []
+                        subscriptions_by_user[uid].append({
+                            "id": sub_row[1],
+                            "start_date": sub_row[2].isoformat() if sub_row[2] else None,
+                            "end_date": sub_row[3].isoformat() if sub_row[3] else None,
+                            "remaining_inhouse": sub_row[4],
+                            "remaining_expert": sub_row[5],
+                            "is_active": bool(sub_row[6]),
+                            "plan_id": sub_row[7],
+                            "plan_name": sub_row[8],
+                            "price": sub_row[9],
+                            "created_at": sub_row[10].isoformat() if sub_row[10] else None,
+                            "plan_type": sub_row[11] or "",
+                            "duration_days": sub_row[12] or 0,
+                            "nutri_max_patients": sub_row[13],
+                            "features": {
+                                "ai_diet": bool(sub_row[14]),
+                                "manual_diet": bool(sub_row[15]),
+                                "chat": bool(sub_row[16]),
+                                "online_appointment": bool(sub_row[17]),
+                                "offline_appointment": bool(sub_row[18]),
+                            }
+                        })
+
+                    cursor.execute(f"""
+                        SELECT pay.user_id, pay.id, pay.amount, pay.razorpay_order_id, pay.razorpay_payment_id,
+                               pay.status, pay.created_at, pay.payment_type, COALESCE(pl.name, 'Plan #' || pay.plan_id::text) as plan_name
+                        FROM subscriptions_payment pay
+                        LEFT JOIN subscriptions_plan pl ON pay.plan_id = pl.id
+                        WHERE pay.user_id IN ({placeholders})
+                        ORDER BY pay.created_at DESC
+                        LIMIT 200;
+                    """, user_ids)
+                    for pr in cursor.fetchall():
+                        uid = pr[0]
+                        if uid not in payments_by_user:
+                            payments_by_user[uid] = []
+                        payments_by_user[uid].append({
+                            "id": pr[1],
+                            "amount": pr[2],
+                            "order_id": pr[3] or "",
+                            "payment_id": pr[4] or "",
+                            "status": pr[5] or "success",
+                            "created_at": pr[6].isoformat() if pr[6] else None,
+                            "payment_type": pr[7] or "subscription",
+                            "plan_name": pr[8] or "",
+                        })
 
             results = []
             for r in rows:
@@ -122,6 +192,9 @@ class ApprovalsListAPI(APIView):
                 if isinstance(langs, str):
                     try: langs = json.loads(langs)
                     except: langs = [langs] if langs else []
+
+                user_subs = subscriptions_by_user.get(r[1], [])
+                active_sub = next((s for s in user_subs if s.get("is_active")), None)
 
                 results.append({
                     "id": r[0],
@@ -173,6 +246,20 @@ class ApprovalsListAPI(APIView):
                     "country": r[40] or "",
                     "assigned_patients_count": r[41] or 0,
                     "total_appointments_count": r[42] or 0,
+                    "subscriptions": user_subs,
+                    "active_subscription": active_sub,
+                    "payments": payments_by_user.get(r[1], []),
+                    "health_profile": {
+                        "city": r[39] or "",
+                        "country": r[40] or "",
+                        "gender": r[43] or "",
+                        "date_of_birth": r[44].isoformat() if r[44] else None,
+                        "height_cm": r[45],
+                        "weight_kg": r[46],
+                        "diet_type": r[47] or "",
+                        "activity_level": r[48] or "",
+                        "goal": r[49] or "",
+                    }
                 })
 
             total_pages = max(1, (total_filtered + page_size - 1) // page_size)
