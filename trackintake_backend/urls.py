@@ -31,6 +31,26 @@ schema_view = get_schema_view(
 )
 
 
+def media_serve(request, path):
+    """
+    Serve media files:
+    1. If the file exists on the local filesystem (e.g. local dev), serve it directly.
+    2. Otherwise, redirect (302) to Cloudinary where persistent uploads are stored.
+    """
+    import os
+    from django.conf import settings
+    from django.http import HttpResponseRedirect
+    from django.views.static import serve as static_serve
+    from .media_utils import build_cloudinary_url
+
+    local_file = os.path.join(settings.MEDIA_ROOT, path)
+    if os.path.exists(local_file) and os.path.isfile(local_file):
+        return static_serve(request, path, document_root=settings.MEDIA_ROOT)
+
+    cloudinary_url = build_cloudinary_url(path)
+    return HttpResponseRedirect(cloudinary_url)
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
 
@@ -61,10 +81,6 @@ urlpatterns = [
     path("api/", include("meals.urls")),
     path("api/nutritionist/", include("nutritionist.urls")),
 
+    # Media routing: Serves local file if present, else 302 redirects to Cloudinary
+    re_path(r'^media/(?P<path>.*)$', media_serve, name='media_serve'),
 ]
-
-from django.conf import settings
-from django.conf.urls.static import static
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

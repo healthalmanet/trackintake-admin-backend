@@ -5,6 +5,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from trackintake_backend.media_utils import build_cloudinary_url
 
 
 def check_db_connection():
@@ -384,15 +385,15 @@ class UserDetailView(APIView):
                         "current_organization": np[18] or "",
                         "offline_location": np[19] or "",
                         "is_virtual_enabled": bool(np[20]),
-                        "government_id": np[21] or "",
-                        "qualification_certificate": np[22] or "",
-                        "registration_certificate": np[23] or "",
-                        "experience_certificate": np[24] or "",
+                        "government_id": build_cloudinary_url(np[21]),
+                        "qualification_certificate": build_cloudinary_url(np[22]),
+                        "registration_certificate": build_cloudinary_url(np[23]),
+                        "experience_certificate": build_cloudinary_url(np[24]),
                         "documents": {
-                            "government_id": np[21] or "",
-                            "qualification_certificate": np[22] or "",
-                            "registration_certificate": np[23] or "",
-                            "experience_certificate": np[24] or "",
+                            "government_id": build_cloudinary_url(np[21]),
+                            "qualification_certificate": build_cloudinary_url(np[22]),
+                            "registration_certificate": build_cloudinary_url(np[23]),
+                            "experience_certificate": build_cloudinary_url(np[24]),
                         }
                     }
 

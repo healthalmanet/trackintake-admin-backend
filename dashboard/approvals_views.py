@@ -4,6 +4,7 @@ from django.db import connection
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from trackintake_backend.media_utils import build_cloudinary_url
 
 
 class ApprovalsListAPI(APIView):
@@ -145,15 +146,15 @@ class ApprovalsListAPI(APIView):
                     "pending_offline_price": float(r[19]) if r[19] else None,
                     "price_approval_status": r[20] or "approved",
                     "price_rejection_reason": r[21] or "",
-                    "government_id": r[22] or "",
-                    "qualification_certificate": r[23] or "",
-                    "registration_certificate": r[24] or "",
-                    "experience_certificate": r[25] or "",
+                    "government_id": build_cloudinary_url(r[22]),
+                    "qualification_certificate": build_cloudinary_url(r[23]),
+                    "registration_certificate": build_cloudinary_url(r[24]),
+                    "experience_certificate": build_cloudinary_url(r[25]),
                     "documents": {
-                        "government_id": r[22] or "",
-                        "qualification_certificate": r[23] or "",
-                        "registration_certificate": r[24] or "",
-                        "experience_certificate": r[25] or "",
+                        "government_id": build_cloudinary_url(r[22]),
+                        "qualification_certificate": build_cloudinary_url(r[23]),
+                        "registration_certificate": build_cloudinary_url(r[24]),
+                        "experience_certificate": build_cloudinary_url(r[25]),
                     },
                     "registration_number": r[26] or "",
                     "issuing_authority": r[27] or "",
@@ -167,7 +168,7 @@ class ApprovalsListAPI(APIView):
                     "offline_payment_required": bool(r[35]),
                     "is_virtual_enabled": bool(r[36]),
                     "additional_certifications": r[37] or "",
-                    "profile_photo": r[38] or "",
+                    "profile_photo": build_cloudinary_url(r[38]),
                     "city": r[39] or "",
                     "country": r[40] or "",
                     "assigned_patients_count": r[41] or 0,
