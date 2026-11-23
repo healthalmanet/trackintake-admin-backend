@@ -5,6 +5,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from trackintake_backend.media_utils import build_cloudinary_url
 
 
 def check_db_connection():
@@ -346,7 +347,9 @@ class UserDetailView(APIView):
                            price_approval_status, price_rejection_reason, professional_title, professional_bio,
                            specializations, languages_spoken, registration_number, issuing_authority,
                            current_organization, offline_location, is_virtual_enabled,
-                           government_id, qualification_certificate, registration_certificate, experience_certificate
+                           government_id, qualification_certificate, registration_certificate, experience_certificate,
+                           is_online_available, is_offline_available, offline_payment_required, additional_certifications,
+                           profile_photo, created_at, updated_at
                     FROM nutritionist_nutritionistprofile
                     WHERE user_id = %s;
                 """, [user_id])
@@ -361,6 +364,11 @@ class UserDetailView(APIView):
                     if isinstance(langs, str):
                         try: langs = json.loads(langs)
                         except: langs = [langs]
+
+                    cursor.execute("SELECT COUNT(*) FROM nutritionist_patientassignment WHERE nutritionist_id = %s;", [user_id])
+                    assigned_patients_count = cursor.fetchone()[0] or 0
+                    cursor.execute("SELECT COUNT(*) FROM appointments_appointment WHERE nutritionist_id = %s;", [user_id])
+                    total_appointments_count = cursor.fetchone()[0] or 0
 
                     nutritionist_profile = {
                         "id": np[0],
@@ -384,27 +392,38 @@ class UserDetailView(APIView):
                         "current_organization": np[18] or "",
                         "offline_location": np[19] or "",
                         "is_virtual_enabled": bool(np[20]),
-                        "government_id": np[21] or "",
-                        "qualification_certificate": np[22] or "",
-                        "registration_certificate": np[23] or "",
-                        "experience_certificate": np[24] or "",
+                        "government_id": build_cloudinary_url(np[21]),
+                        "qualification_certificate": build_cloudinary_url(np[22]),
+                        "registration_certificate": build_cloudinary_url(np[23]),
+                        "experience_certificate": build_cloudinary_url(np[24]),
                         "documents": {
-                            "government_id": np[21] or "",
-                            "qualification_certificate": np[22] or "",
-                            "registration_certificate": np[23] or "",
-                            "experience_certificate": np[24] or "",
-                        }
+                            "government_id": build_cloudinary_url(np[21]),
+                            "qualification_certificate": build_cloudinary_url(np[22]),
+                            "registration_certificate": build_cloudinary_url(np[23]),
+                            "experience_certificate": build_cloudinary_url(np[24]),
+                        },
+                        "is_online_available": bool(np[25]),
+                        "is_offline_available": bool(np[26]),
+                        "offline_payment_required": bool(np[27]),
+                        "additional_certifications": np[28] or "",
+                        "profile_photo": build_cloudinary_url(np[29]),
+                        "created_at": np[30].isoformat() if np[30] else None,
+                        "updated_at": np[31].isoformat() if np[31] else None,
+                        "assigned_patients_count": assigned_patients_count,
+                        "total_appointments_count": total_appointments_count,
                     }
 
                 # 4. Subscriptions
                 cursor.execute("""
                     SELECT s.id, s.start_date, s.end_date, s.remaining_inhouse, s.remaining_expert,
                            s.is_active, p.id as plan_id, COALESCE(p.name, 'Subscription Plan') as plan_name,
-                           COALESCE(p.price, 0) as price, s.created_at
+                           COALESCE(p.price, 0) as price, s.created_at, p.plan_type, p.duration_days,
+                           p.nutri_max_patients, p.nutri_ai_diet_allowed, p.nutri_manual_diet_allowed,
+                           p.nutri_chat_allowed, p.nutri_online_appointment_allowed, p.nutri_offline_appointment_allowed
                     FROM subscriptions_usersubscription s
                     LEFT JOIN subscriptions_plan p ON s.plan_id = p.id
                     WHERE s.user_id = %s
-                    ORDER BY s.created_at DESC;
+                    ORDER BY s.is_active DESC, s.created_at DESC;
                 """, [user_id])
                 subscriptions = [
                     {
@@ -418,6 +437,16 @@ class UserDetailView(APIView):
                         "plan_name": r[7],
                         "price": r[8],
                         "created_at": r[9].isoformat() if r[9] else None,
+                        "plan_type": r[10] or "",
+                        "duration_days": r[11] or 0,
+                        "nutri_max_patients": r[12],
+                        "features": {
+                            "ai_diet": bool(r[13]),
+                            "manual_diet": bool(r[14]),
+                            "chat": bool(r[15]),
+                            "online_appointment": bool(r[16]),
+                            "offline_appointment": bool(r[17]),
+                        }
                     }
                     for r in cursor.fetchall()
                 ]
@@ -474,6 +503,8 @@ class UserDetailView(APIView):
                     for r in cursor.fetchall()
                 ]
 
+            active_subscription = next((s for s in subscriptions if s.get("is_active")), None)
+
             resp_data = {
                 **user_data,
                 "status": "success",
@@ -481,6 +512,7 @@ class UserDetailView(APIView):
                 "health_profile": health_profile,
                 "nutritionist_profile": nutritionist_profile,
                 "subscriptions": subscriptions,
+                "active_subscription": active_subscription,
                 "payments": payments,
                 "appointments": appointments,
             }
