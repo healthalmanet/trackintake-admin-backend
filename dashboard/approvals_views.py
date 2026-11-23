@@ -244,6 +244,7 @@ class ApprovalsListAPI(APIView):
                     "profile_photo": build_cloudinary_url(r[38]),
                     "city": r[39] or "",
                     "country": r[40] or "",
+                    "gender": r[43] or "",
                     "assigned_patients_count": r[41] or 0,
                     "total_appointments_count": r[42] or 0,
                     "subscriptions": user_subs,

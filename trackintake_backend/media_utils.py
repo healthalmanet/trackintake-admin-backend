@@ -27,3 +27,4 @@ def build_cloudinary_url(path):
     resource_type = 'raw' if ext in CLOUDINARY_RAW_EXTENSIONS else 'image'
 
     return f"https://res.cloudinary.com/{cloud_name}/{resource_type}/upload/media/{clean_path}"
+
