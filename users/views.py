@@ -550,6 +550,18 @@ class UserDetailView(APIView):
                     if not cursor.fetchone():
                         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
+            if "is_active" in data:
+                from .blocking import sync_user_block_state
+                raw_active = data["is_active"]
+                parsed_active = (
+                    raw_active.lower() in ("true", "1", "active")
+                    if isinstance(raw_active, str)
+                    else bool(raw_active)
+                )
+                sync_user_block_state(user_id, parsed_active, reason=data.get("blocked_reason", ""))
+
+            with connection.cursor() as cursor:
+
                 # 2. Update or Insert Health Profile if health fields provided
                 health_data = data.get("health_profile") or data
                 hp_fields = [
@@ -623,6 +635,9 @@ class UserDetailView(APIView):
 
         if not updated:
             return Response({"error": "User not found"}, status=404)
+
+        from .blocking import sync_user_block_state
+        sync_user_block_state(user_id, False, reason="Blocked by administrator")
 
         return Response({"message": "User access deactivated successfully"})
 
@@ -888,6 +903,9 @@ class UserToggleStatusAPI(APIView):
 
             cursor.execute("UPDATE user_user SET is_active = %s WHERE id = %s RETURNING id, is_active;", [new_status, user_id])
             updated = cursor.fetchone()
+
+        from .blocking import sync_user_block_state
+        sync_user_block_state(user_id, new_status, reason=request.data.get("reason", ""))
 
         action_word = "activated and login access restored" if new_status else "disabled and login access blocked"
         return Response({
