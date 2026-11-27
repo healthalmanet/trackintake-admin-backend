@@ -237,8 +237,8 @@ class UserListCreateView(APIView):
 
         now_utc = datetime.now(timezone.utc)
         query = """
-            INSERT INTO user_user (full_name, email, phone_number, password, role, is_active, is_admin, is_superuser, date_joined)
-            VALUES (%s, %s, %s, %s, %s, true, false, false, %s)
+            INSERT INTO user_user (full_name, email, phone_number, password, role, is_active, is_admin, is_superuser, is_blocked, date_joined)
+            VALUES (%s, %s, %s, %s, %s, true, false, false, false, %s)
             RETURNING id;
         """
         with connection.cursor() as cursor:
